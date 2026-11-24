@@ -102,7 +102,9 @@ New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 $tag = "v$VersionName"
 $apkName = "kexiaomiao-$tag.apk"
 $outApk = Join-Path $outDir $apkName
+$cnApk = Join-Path $outDir "科小喵-$tag.apk"
 Copy-Item -Force $builtApk $outApk
+Copy-Item -Force $builtApk $cnApk
 
 $sha256 = (Get-FileHash $outApk -Algorithm SHA256).Hash.ToLowerInvariant()
 $size = (Get-Item $outApk).Length

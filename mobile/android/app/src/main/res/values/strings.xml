@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">河科大校园助手</string>
-    <string name="title_activity_main">河科大校园助手</string>
+    <string name="app_name">科小喵</string>
+    <string name="title_activity_main">科小喵</string>
     <string name="package_name">cn.edu.haust.campusassistant</string>
     <string name="custom_url_scheme">cn.edu.haust.campusassistant</string>
 </resources>

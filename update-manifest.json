@@ -1,5 +1,5 @@
 {
-    "updatedAt":  "2026-11-24T15:10:39Z",
+    "updatedAt":  "2026-11-24T15:30:02Z",
     "schemaVersion":  1,
     "beta":  {
                  "size":  3367391,
@@ -13,16 +13,16 @@
              },
     "stable":  {
                    "mirrors":  [
-                                   "https://edgeone.gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.0/kexiaomiao-v0.2.0.apk",
-                                   "https://gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.0/kexiaomiao-v0.2.0.apk"
+                                   "https://edgeone.gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.1/kexiaomiao-v0.2.1.apk",
+                                   "https://gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.1/kexiaomiao-v0.2.1.apk"
                                ],
-                   "apkUrl":  "https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.0/kexiaomiao-v0.2.0.apk",
-                   "size":  3367695,
-                   "notes":  "科小喵 v0.2.0 正式版发布！\n1. 新增全局手势阻尼下拉刷新与 Android 原生线性马达微触感反馈\n2. 优化云端自动更新下载速度（接入 EdgeOne 高速加速源、3 秒低速自动熔断切源与实时网速显示）\n3. 统一全屏原生登录与双层连贯认证动效、学习通仪表盘聚合、通知离线库",
-                   "publishedAt":  "2026-11-24T15:10:39Z",
-                   "sha256":  "cde1edd5a1076fdc9a4e79ac52ca361ceec117cbbbca9074a80bae8ef507947d",
+                   "apkUrl":  "https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.1/kexiaomiao-v0.2.1.apk",
+                   "size":  3372843,
+                   "notes":  "科小喵 v0.2.1 正式版\n1. 更换全新「科小喵」专属品牌图标（全套自适应防裁切高清图标）\n2. 桌面应用名正式升级为「科小喵」",
+                   "publishedAt":  "2026-11-24T15:30:02Z",
+                   "sha256":  "2ba03e495466dbcf321fd0e3b31297a7d0e78ceb22fc9935bd7baeca302af67f",
                    "channel":  "stable",
-                   "versionName":  "0.2.0",
-                   "versionCode":  15
+                   "versionName":  "0.2.1",
+                   "versionCode":  16
                }
 }
