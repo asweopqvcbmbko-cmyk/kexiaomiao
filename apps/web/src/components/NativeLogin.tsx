@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { data } from '../api'
+import { haptic } from '../haptics'
 import { readChaoxingAccount } from '../android/lib/chaoxing-auth'
 import type { AuthOptions, AuthProgressEvent, AuthRequest, AuthResult } from '../types'
 import { AuthMorphOverlay } from './AuthMorphOverlay'
@@ -127,6 +128,7 @@ export function NativeLogin({ platform, authenticate, onClose, onSuccess, onManu
     setSms(null)
     setQrRunning(false)
     if (result.ok) {
+      haptic('success')
       setPassword('')
       setCode('')
       setOverlay({ kind: 'success', message: '登录成功', leaving: false })
@@ -140,6 +142,7 @@ export function NativeLogin({ platform, authenticate, onClose, onSuccess, onManu
         setOverlay(null)
         return
       }
+      haptic('error')
       setOverlay({ kind: 'error', message: result.message, leaving: false })
       timer.current = setTimeout(dismissError, 1400)
     }

@@ -53,6 +53,7 @@ type Plugin = {
   clearCookiesForHosts(o: { hosts: string }): Promise<{ ok: boolean }>
   openExternal(o: { url: string }): Promise<{ ok: boolean }>
   launchApp(o: { packageName: string }): Promise<{ launched: boolean; installed: boolean }>
+  haptic(o: { style: 'light' | 'medium' | 'success' | 'error' }): Promise<void>
   statusBar(o: { color: string; dark: boolean }): Promise<void>
 }
 

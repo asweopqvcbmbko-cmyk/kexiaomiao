@@ -1,15 +1,15 @@
 {
-    "updatedAt":  "2026-11-24T14:31:13Z",
+    "updatedAt":  "2026-11-24T15:01:57Z",
     "schemaVersion":  1,
     "beta":  {
-                 "size":  3366103,
+                 "size":  3367391,
                  "channel":  "beta",
-                 "publishedAt":  "2026-11-24T14:31:13Z",
-                 "versionCode":  13,
-                 "apkUrl":  "https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.0-beta.2/kexiaomiao-v0.2.0-beta.2.apk",
-                 "notes":  "1. 项目正式开源并合仓发布（源码与云端更新源统一至 asweopqvcbmbko-cmyk/kexiaomiao）\n2. 内置云端自动更新（正式版/Beta 渠道切换、应用内下载进度、SHA256 校验与一键覆盖安装）\n3. 全屏原生登录与双层连贯认证动效、学习通仪表盘聚合",
-                 "versionName":  "0.2.0-beta.2",
-                 "sha256":  "0c642082a9b9e0c2cecc970013276cfc0e4232982a64e2797bf3993e8f4a6cee"
+                 "publishedAt":  "2026-11-24T15:01:57Z",
+                 "versionCode":  14,
+                 "apkUrl":  "https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.0-beta.3/kexiaomiao-v0.2.0-beta.3.apk",
+                 "notes":  "1. 新增全局手势阻尼下拉刷新（首页 / 仪表盘 / 通知页丝滑下拉即刷）\n2. 新增 Android 原生线性马达微触感反馈（Tab 切换、下拉到达阈值、刷新完成、开关与登录结果）\n3. 修复云端更新清单 CDN 缓存延迟，发版后秒级可检",
+                 "versionName":  "0.2.0-beta.3",
+                 "sha256":  "e3a90ab6fdf62cd243674777782c67ab1e05546f1227fc4148c677cdd50b68e4"
              },
     "stable":  null
 }

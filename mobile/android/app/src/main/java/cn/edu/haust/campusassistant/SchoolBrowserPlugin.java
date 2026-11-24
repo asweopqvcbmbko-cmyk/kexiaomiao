@@ -1414,6 +1414,34 @@ public class SchoolBrowserPlugin extends Plugin {
 
     /** 按白名单包名唤起已安装的校方 App（如「我i科大」） */
     @PluginMethod
+    public void haptic(PluginCall call) {
+        String style = call.getString("style", "light");
+        getActivity().runOnUiThread(() -> {
+            try {
+                View target = getBridge() != null ? getBridge().getWebView() : null;
+                if (target == null) target = getActivity().getWindow().getDecorView();
+                int feedback;
+                if ("success".equals(style)) {
+                    feedback = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R
+                            ? android.view.HapticFeedbackConstants.CONFIRM
+                            : android.view.HapticFeedbackConstants.CONTEXT_CLICK;
+                } else if ("error".equals(style)) {
+                    feedback = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R
+                            ? android.view.HapticFeedbackConstants.REJECT
+                            : android.view.HapticFeedbackConstants.LONG_PRESS;
+                } else if ("medium".equals(style)) {
+                    feedback = android.view.HapticFeedbackConstants.CONTEXT_CLICK;
+                } else {
+                    feedback = android.view.HapticFeedbackConstants.CLOCK_TICK;
+                }
+                target.performHapticFeedback(feedback, android.view.HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING);
+            } catch (Exception ignored) {
+            }
+            call.resolve();
+        });
+    }
+
+    @PluginMethod
     public void launchApp(PluginCall call) {
         String pkg = call.getString("packageName", "");
         if (!ALLOWED_LAUNCH_PACKAGES.contains(pkg)) {

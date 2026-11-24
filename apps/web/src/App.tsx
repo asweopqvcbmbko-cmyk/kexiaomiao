@@ -3,7 +3,9 @@ import { Icon } from './icons'
 import { AboutModal, ConflictModal, CourseModal, ThemeModal } from './components/InfoModals'
 import { Empty, Modal, PageHeader } from './components/ui'
 import { NativeLogin } from './components/NativeLogin'
+import { PullToRefresh } from './components/PullToRefresh'
 import { UpdateAvailableModal, UpdateSettingsModal } from './components/UpdateModal'
+import { haptic } from './haptics'
 import {
   checkForAppUpdate,
   getCurrentAppVersion,
@@ -1241,7 +1243,10 @@ export default function App() {
     <button
       key={t}
       className={!sub && tab === t ? 'active' : ''}
-      onClick={() => go(t)}
+      onClick={() => {
+        if (tab !== t || sub) haptic('light')
+        go(t)
+      }}
       aria-current={!sub && tab === t ? 'page' : undefined}
     >
       <span className="navicon">
@@ -1492,9 +1497,15 @@ export default function App() {
           </div>
         </aside>
         <main className={`content${sub === 'schedule' ? ' schedule-page' : ''}`} id="content">
-          <div className="page" key={`${sub || tab}-${week}-${view}-${day}`}>
-            {body}
-          </div>
+          <PullToRefresh
+            disabled={!!modal || !!sub || tab === 'profile'}
+            refreshing={tab === 'dashboard' ? chaoxingLoading : refreshing}
+            onRefresh={() => (tab === 'dashboard' ? refreshChaoxing({ force: true }) : manualRefresh())}
+          >
+            <div className="page" key={`${sub || tab}-${week}-${view}-${day}`}>
+              {body}
+            </div>
+          </PullToRefresh>
         </main>
       </div>
       <nav className="mobile-nav" aria-label="主导航">

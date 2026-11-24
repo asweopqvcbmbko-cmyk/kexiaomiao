@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Modal } from './ui'
+import { haptic } from '../haptics'
 import {
   cancelActiveDownload,
   downloadAndInstallRelease,
@@ -46,7 +47,10 @@ export function UpdateSettingsModal({
             role="switch"
             className="update-switch"
             checked={settings.autoCheck}
-            onChange={(e) => onChange({ ...settings, autoCheck: e.target.checked })}
+            onChange={(e) => {
+              haptic('light')
+              onChange({ ...settings, autoCheck: e.target.checked })
+            }}
           />
         </label>
 
@@ -60,7 +64,10 @@ export function UpdateSettingsModal({
             role="switch"
             className="update-switch"
             checked={settings.includeBeta}
-            onChange={(e) => onChange({ ...settings, includeBeta: e.target.checked, ignoredVersion: '' })}
+            onChange={(e) => {
+              haptic('light')
+              onChange({ ...settings, includeBeta: e.target.checked, ignoredVersion: '' })
+            }}
           />
         </label>
       </div>

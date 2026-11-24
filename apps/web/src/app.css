@@ -781,6 +781,53 @@ b, strong { font-weight: 650; }
 }
 .update-perm-box p { margin: 0; font-size: 13px; line-height: 1.5; color: var(--text); }
 
+/* ── 全局下拉刷新 ──────────────────────────────────────────────────────── */
+.ptr-wrap { position: relative; min-height: 100%; }
+.ptr-indicator {
+  position: fixed;
+  top: calc(var(--safe-top) + 10px);
+  left: 50%;
+  margin-left: -74px;
+  width: 148px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border-radius: 999px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  z-index: 30;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .18s ease, color .16s ease;
+}
+.ptr-indicator.visible { opacity: 1; }
+.ptr-indicator.ready { color: var(--brand); }
+.ptr-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  font-size: 13px;
+  transition: transform .18s ease;
+}
+.ptr-indicator.ready .ptr-icon { transform: rotate(180deg); }
+.ptr-spinner {
+  display: block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--line);
+  border-top-color: var(--brand);
+  border-radius: 50%;
+  animation: auth-spin .75s linear infinite;
+}
+.ptr-body { will-change: transform; }
+
 /* ── 动画 ─────────────────────────────────────────────────────────────── */
 @keyframes rotate { to { transform: rotate(360deg); } }
 @keyframes rise { from { opacity: 0; transform: translateY(10px); } }
