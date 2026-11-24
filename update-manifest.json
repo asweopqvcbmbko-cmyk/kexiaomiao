@@ -1,0 +1,15 @@
+{
+    "updatedAt":  "2026-11-24T14:31:13Z",
+    "schemaVersion":  1,
+    "beta":  {
+                 "size":  3366103,
+                 "channel":  "beta",
+                 "publishedAt":  "2026-11-24T14:31:13Z",
+                 "versionCode":  13,
+                 "apkUrl":  "https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.0-beta.2/kexiaomiao-v0.2.0-beta.2.apk",
+                 "notes":  "1. 项目正式开源并合仓发布（源码与云端更新源统一至 asweopqvcbmbko-cmyk/kexiaomiao）\n2. 内置云端自动更新（正式版/Beta 渠道切换、应用内下载进度、SHA256 校验与一键覆盖安装）\n3. 全屏原生登录与双层连贯认证动效、学习通仪表盘聚合",
+                 "versionName":  "0.2.0-beta.2",
+                 "sha256":  "0c642082a9b9e0c2cecc970013276cfc0e4232982a64e2797bf3993e8f4a6cee"
+             },
+    "stable":  null
+}
