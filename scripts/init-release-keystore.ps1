@@ -7,7 +7,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$JdkHome = "D:\AppStore\android-tools\jdk",
+    [string]$JdkHome = "",
     [string]$KeyAlias = "kexiaomiao"
 )
 
@@ -23,8 +23,9 @@ if (Test-Path $jksPath) {
     exit 0
 }
 
-$keytool = Join-Path $JdkHome "bin\keytool.exe"
-if (-not (Test-Path $keytool)) {
+if (-not $JdkHome -and $env:JAVA_HOME) { $JdkHome = $env:JAVA_HOME }
+$keytool = if ($JdkHome) { Join-Path $JdkHome "bin\keytool.exe" } else { "" }
+if (-not $keytool -or -not (Test-Path $keytool)) {
     $keytool = (Get-Command keytool -ErrorAction Stop).Source
 }
 

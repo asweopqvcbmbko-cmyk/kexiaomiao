@@ -1,5 +1,8 @@
 # 科小喵（KeXiaoMiao）· 河南科技大学校园助手
 
+[![CI](https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/actions/workflows/ci.yml/badge.svg)](https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+
 一款面向河南科技大学（HAUST）学生的轻量级校园日常助手，采用 **React + TypeScript + Capacitor Android**（兼顾 Electron 桌面端复用）架构，纯本地直连校园服务，**无任何第三方中转服务器**，所有账号凭据仅保存在本机安全存储中。
 
 ## 核心功能
@@ -38,9 +41,8 @@
 ### 1. 安装依赖与运行 Web 预览
 
 ```bash
-npm install
-cd apps/web
-npm run dev
+pnpm install
+pnpm dev:web
 ```
 
 浏览器打开 `http://localhost:5173/?preview=1` 可在离线状态下预览全部界面与交互动效。
@@ -48,16 +50,15 @@ npm run dev
 ### 2. 类型检查与离线单元测试
 
 ```bash
-cd apps/web
-npx tsc --noEmit
-npm test
+pnpm typecheck
+pnpm test
 ```
 
 ### 3. 构建 Android APK
 
 ```bash
-cd apps/web && npm run build
-cd ../../mobile && npx cap sync android
+pnpm build:web
+cd mobile && npx cap sync android
 cd android && ./gradlew assembleDebug
 ```
 

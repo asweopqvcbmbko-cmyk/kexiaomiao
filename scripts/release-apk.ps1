@@ -16,7 +16,7 @@ param(
     [string]$Notes = "体验优化与问题修复",
     [string]$Repo = "",
     [string]$Branch = "main",
-    [string]$JdkHome = "D:\AppStore\android-tools\jdk",
+    [string]$JdkHome = "",
     [switch]$SkipPush
 )
 
@@ -78,8 +78,11 @@ try {
     Pop-Location
 }
 
-$env:JAVA_HOME = $JdkHome
-$env:Path = "$env:JAVA_HOME\bin;$env:Path"
+if (-not $JdkHome -and $env:JAVA_HOME) { $JdkHome = $env:JAVA_HOME }
+if ($JdkHome -and (Test-Path $JdkHome)) {
+    $env:JAVA_HOME = $JdkHome
+    $env:Path = "$env:JAVA_HOME\bin;$env:Path"
+}
 Push-Location (Join-Path $repoRoot "mobile\android")
 try {
     & .\gradlew.bat assembleRelease --console=plain

@@ -689,9 +689,10 @@ async function runTests() {
   // 29. update-config.ts: 占位仓库检测与多路镜像回退 URL 构造
   assert.equal(isUpdateRepoConfigured('YOUR_GITHUB_USER/kexiaomiao-releases'), false)
   assert.equal(isUpdateRepoConfigured('alice/kexiaomiao-releases'), true)
-  const manifestUrls = buildManifestUrls('alice/kexiaomiao-releases')
+  const manifestUrls = buildManifestUrls('alice/kexiaomiao-releases', 'main', 123456)
   assert.ok(manifestUrls.length >= 4)
-  assert.ok(manifestUrls[manifestUrls.length - 1].startsWith('https://raw.githubusercontent.com/'))
+  assert.ok(manifestUrls[0].includes('raw.githubusercontent.com') && manifestUrls[0].includes('t=123456'))
+  assert.ok(manifestUrls[manifestUrls.length - 1].startsWith('https://cdn.jsdelivr.net/'))
   const apkUrls = buildApkDownloadUrls('https://github.com/alice/kexiaomiao-releases/releases/download/v0.2.0/app.apk')
   assert.ok(apkUrls.length >= 4)
   assert.equal(apkUrls[apkUrls.length - 1], 'https://github.com/alice/kexiaomiao-releases/releases/download/v0.2.0/app.apk')

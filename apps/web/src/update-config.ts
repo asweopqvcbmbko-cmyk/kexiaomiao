@@ -23,14 +23,19 @@ export function isUpdateRepoConfigured(repo = UPDATE_GITHUB_REPO): boolean {
   return /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo) && !repo.startsWith('YOUR_GITHUB_USER/')
 }
 
-/** 生成版本清单（update-manifest.json）的多路加速 + 直连候选地址 */
-export function buildManifestUrls(repo = UPDATE_GITHUB_REPO, branch = UPDATE_MANIFEST_BRANCH): string[] {
+/** 生成版本清单（update-manifest.json）的多路加速 + 直连候选地址（优先实时源并带防缓存参数，jsDelivr 仅作最后兜底） */
+export function buildManifestUrls(
+  repo = UPDATE_GITHUB_REPO,
+  branch = UPDATE_MANIFEST_BRANCH,
+  cacheBuster = Date.now()
+): string[] {
   const rawGithub = `https://raw.githubusercontent.com/${repo}/${branch}/${UPDATE_MANIFEST_FILE}`
+  const bustedRaw = `${rawGithub}?t=${cacheBuster}`
   const jsdelivr = `https://cdn.jsdelivr.net/gh/${repo}@${branch}/${UPDATE_MANIFEST_FILE}`
   const urls: string[] = [
-    jsdelivr,
-    ...GITHUB_MIRROR_PREFIXES.map((prefix) => `${prefix}${rawGithub}`),
-    rawGithub
+    ...GITHUB_MIRROR_PREFIXES.map((prefix) => `${prefix}${bustedRaw}`),
+    bustedRaw,
+    jsdelivr
   ]
   return [...new Set(urls)]
 }
