@@ -46,6 +46,7 @@ export type DownloadProgress = {
   totalBytes: number
   percent: number
   mirrorIndex: number
+  speedBytesPerSec?: number
 }
 
 export type UpdateCheckResult =

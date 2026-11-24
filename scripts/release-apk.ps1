@@ -129,6 +129,10 @@ $entry = @{
     versionName = $VersionName
     channel     = $Channel
     apkUrl      = $apkUrl
+    mirrors     = @(
+        "https://edgeone.gh-proxy.com/$apkUrl",
+        "https://gh-proxy.com/$apkUrl"
+    )
     sha256      = $sha256
     size        = $size
     notes       = $Notes

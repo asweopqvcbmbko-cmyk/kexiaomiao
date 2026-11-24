@@ -178,7 +178,10 @@ public class AppUpdaterPlugin extends Plugin {
                     long totalBytes = conn.getContentLengthLong();
                     MessageDigest digest = MessageDigest.getInstance("SHA-256");
                     long downloaded = 0;
+                    long startedAt = System.currentTimeMillis();
                     long lastEmit = 0;
+                    boolean tooSlow = false;
+                    boolean hasFallback = i < urls.size() - 1;
 
                     try (InputStream in = new BufferedInputStream(conn.getInputStream());
                          FileOutputStream fos = new FileOutputStream(part)) {
@@ -194,15 +197,29 @@ public class AppUpdaterPlugin extends Plugin {
                             digest.update(buf, 0, n);
                             downloaded += n;
                             long now = System.currentTimeMillis();
+                            long elapsedMs = Math.max(1L, now - startedAt);
+                            long speedBps = downloaded * 1000L / elapsedMs;
+                            // 若还有备用节点，且 3 秒后平均速率仍低于 150 KB/s，主动熔断切换更快节点
+                            if (hasFallback && elapsedMs >= 3000L && speedBps < 150L * 1024L && downloaded < totalBytes * 8L / 10L) {
+                                tooSlow = true;
+                                break;
+                            }
                             if (now - lastEmit >= 160) {
                                 lastEmit = now;
-                                emitProgress(downloaded, totalBytes, i);
+                                emitProgress(downloaded, totalBytes, i, speedBps);
                             }
                         }
-                        fos.getFD().sync();
+                        if (!tooSlow) fos.getFD().sync();
                     }
 
-                    emitProgress(downloaded, totalBytes > 0 ? totalBytes : downloaded, i);
+                    if (tooSlow) {
+                        cleanupFile(part);
+                        lastError = "节点过慢，正在切换高速源";
+                        continue;
+                    }
+
+                    long finalElapsed = Math.max(1L, System.currentTimeMillis() - startedAt);
+                    emitProgress(downloaded, totalBytes > 0 ? totalBytes : downloaded, i, downloaded * 1000L / finalElapsed);
                     String actualSha = toHex(digest.digest());
                     if (!expectedSha256.isEmpty() && !expectedSha256.equals(actualSha)) {
                         cleanupFile(part);
@@ -301,13 +318,14 @@ public class AppUpdaterPlugin extends Plugin {
         }
     }
 
-    private void emitProgress(long downloaded, long total, int mirrorIndex) {
+    private void emitProgress(long downloaded, long total, int mirrorIndex, long speedBytesPerSec) {
         JSObject data = new JSObject();
         data.put("downloadedBytes", downloaded);
         data.put("totalBytes", total);
         int pct = total > 0 ? (int) Math.min(100, Math.round(downloaded * 100.0 / total)) : -1;
         data.put("percent", pct);
         data.put("mirrorIndex", mirrorIndex);
+        data.put("speedBytesPerSec", speedBytesPerSec);
         notifyListeners("downloadProgress", data);
     }
 

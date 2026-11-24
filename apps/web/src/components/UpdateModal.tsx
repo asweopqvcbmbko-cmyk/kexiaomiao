@@ -199,7 +199,8 @@ export function UpdateAvailableModal({
           {progress && progress.totalBytes > 0 ? (
             <small>
               {formatBytes(progress.downloadedBytes)} / {formatBytes(progress.totalBytes)}
-              {progress.mirrorIndex > 0 ? ` · 加速节点 #${progress.mirrorIndex + 1}` : ''}
+              {progress.speedBytesPerSec ? ` · ${formatBytes(progress.speedBytesPerSec)}/s` : ''}
+              {progress.mirrorIndex > 0 ? ` · 节点 #${progress.mirrorIndex + 1}` : ''}
             </small>
           ) : null}
         </div>

@@ -12,11 +12,11 @@ export const UPDATE_GITHUB_REPO = ENV_REPO || 'asweopqvcbmbko-cmyk/kexiaomiao'
 export const UPDATE_MANIFEST_BRANCH = 'main'
 export const UPDATE_MANIFEST_FILE = 'update-manifest.json'
 
-/** 国内 GitHub 加速代理前缀（按优先级依次回退，最后回退到 GitHub 直连） */
+/** 国内 GitHub 加速代理前缀（按实测速度优先排序，最后回退到 GitHub 直连） */
 export const GITHUB_MIRROR_PREFIXES = [
-  'https://ghfast.top/',
+  'https://edgeone.gh-proxy.com/',
   'https://gh-proxy.com/',
-  'https://ghproxy.net/'
+  'https://ghfast.top/'
 ] as const
 
 export function isUpdateRepoConfigured(repo = UPDATE_GITHUB_REPO): boolean {
