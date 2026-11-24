@@ -1,0 +1,18 @@
+{
+  "appId": "cn.edu.haust.campusassistant",
+  "appName": "河科大校园助手",
+  "webDir": "../apps/web/dist",
+  "android": {
+    "allowMixedContent": true,
+    "webContentsDebuggingEnabled": false,
+    "loggingBehavior": "none"
+  },
+  "server": {
+    "androidScheme": "https"
+  },
+  "plugins": {
+    "SystemBars": {
+      "insetsHandling": "css"
+    }
+  }
+}

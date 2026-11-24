@@ -1,0 +1,42 @@
+/**
+ * 图标：路径数据逐字取自科小喵原型的 `paths` 表，保证视觉一致。
+ * 原型用 `icon(name)` 返回 SVG 字符串；这里改成 React 组件 <Icon name="..."/>。
+ */
+const paths: Record<string, string> = {
+  home: 'm3 10 9-7 9 7v10h-6v-6H9v6H3z',
+  calendar: 'M4 5h16v16H4zM4 10h16M8 3v4M16 3v4M9 10v11M15 10v11',
+  task: 'm4 6 2 2 4-4M13 6h7M4 13h5M13 13h7M4 20h5M13 20h7',
+  user: 'M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0ZM4 21v-2a8 8 0 0 1 16 0v2',
+  bell: 'M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4',
+  refresh: 'M20 7v-4l-3 3a8 8 0 1 0 3 8M20 7h-5',
+  arrow: 'm9 5 7 7-7 7',
+  left: 'm15 5-7 7 7 7',
+  pin: 'M19 9c0 5-7 12-7 12S5 14 5 9a7 7 0 0 1 14 0ZM14 9a2 2 0 1 1-4 0 2 2 0 0 1 4 0Z',
+  clock: 'M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0ZM12 6v6l4 2',
+  // 原型是 'm5 12 4 4L20 5'：那条 tick 的墨迹外接框中心在 (12.5, 10.5)，放进方框会偏高约 1px。
+  // 这里整体挪 (-0.5, +1.5) 让它正好落在 viewBox 中心 (12,12) —— 形状不变，只是居中。
+  check: 'm4.5 13.5 4 4L19.5 6.5',
+  close: 'm6 6 12 12M6 18 18 6',
+  bolt: 'm13 2-9 12h7l-1 8 10-13h-7z',
+  card: 'M3 5h18v14H3zM3 10h18M6 15h4',
+  air: 'M3 4h18v12H3zM7 20v-1M12 22v-3M17 20v-1M6 12h12',
+  book: 'M3 4h7l2 2 2-2h7v16h-7l-2 2-2-2H3zM12 6v16',
+  grid: 'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z',
+  moon: 'M21 13a9 9 0 0 1-10-10A9 9 0 1 0 21 13Z',
+  sun: 'M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0ZM12 2v2M12 20v2M2 12h2M20 12h2M5 5l1 1M18 18l1 1M5 19l1-1M18 6l1-1',
+  monitor: 'M3 3h18v14H3zM8 21h8M12 17v4',
+  info: 'M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0ZM12 11v6M12 7v1',
+  storage: 'M3 6c0-5 18-5 18 0s-18 5-18 0Zm0 0v12c0 5 18 5 18 0V6M3 12c0 5 18 5 18 0',
+  cap: 'm2 9 10-6 10 6-10 6zM6 12v6q6 5 12 0v-6M22 9v8',
+  warning: 'm12 3 10 18H2zM12 9v5M12 17v1',
+  cat: 'M4 9 3 3l6 3h6l6-3-1 6q5 12-8 12T4 9ZM8 12v1M16 12v1m-6 3 2 1 2-1',
+  sync: 'm4 8 4-4M4 8h5M4 8a8 8 0 0 1 15-2m1 10-4 4m4-4h-5m5 0a8 8 0 0 1-15 2'
+}
+
+export function Icon({ name, className }: { name: string; className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className={className}>
+      <path d={paths[name] || paths.info} />
+    </svg>
+  )
+}

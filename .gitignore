@@ -1,0 +1,33 @@
+node_modules/
+dist/
+out/
+build/
+refs/
+*.log
+.DS_Store
+
+# Android and local tools
+**/build/
+.gradle/
+mobile/android/local.properties
+mobile/android/keystore.properties
+.idea/
+*.iml
+*.apk
+*.aab
+*.idsig
+*.jks
+*.keystore
+*.p12
+.env
+.env.*
+!.env.example
+*.tmp
+Thumbs.db
+
+# Historical Windows packages and local data snapshots
+/apps/desktop/release/
+/prototype/data.js
+/fixtures/courses.json
+/script.py
+/ui.tsx

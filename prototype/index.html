@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>校园助手 · 三版界面演示（第二轮）</title>
+<style>
+  :root{ --ink:#e9eef6; --muted:#8b98ad; --line:#242a34; --accent:#5b8cff }
+  *{box-sizing:border-box}
+  body{margin:0;padding:26px 22px 60px;background:#06070a;color:var(--ink);
+    font-family:-apple-system,"PingFang SC","Microsoft YaHei",system-ui,sans-serif}
+  h1{margin:0 0 6px;font-size:20px;letter-spacing:.3px}
+  .lead{color:var(--muted);font-size:12.5px;line-height:1.85;max-width:940px}
+  .lead b{color:#cfd8e6}
+  .lead code{background:#161b22;padding:1px 5px;border-radius:4px;font-size:11.5px}
+  .frames{display:flex;gap:20px;margin:24px 0 6px;overflow-x:auto;padding-bottom:12px}
+  .col{flex:none;width:390px}
+  .col .ttl{display:flex;align-items:baseline;gap:8px;margin-bottom:8px}
+  .col .ttl b{font-size:14px}
+  .col .ttl span{font-size:11px;color:var(--muted)}
+  .col .frame{width:390px;height:844px;border-radius:26px;overflow:hidden;
+    border:1px solid var(--line);background:#000;box-shadow:0 18px 50px rgba(0,0,0,.65)}
+  .col iframe{width:390px;height:844px;border:0;display:block}
+  .col .open{margin-top:8px;font-size:11.5px}
+  .col .open a{color:var(--accent);text-decoration:none}
+  table{border-collapse:collapse;margin-top:22px;font-size:12px;max-width:1120px;width:100%}
+  th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top;line-height:1.7}
+  th{background:#11141a;color:var(--muted);font-weight:600;white-space:nowrap}
+  td b{color:#fff}
+  .tip{margin-top:18px;padding:12px 14px;border:1px solid #2a3140;border-radius:10px;
+    background:#0d1016;color:var(--muted);font-size:12px;line-height:1.85;max-width:940px}
+  .tip b{color:var(--ink)}
+  .tip a{color:#5b8cff}
+  .warn{border-color:#3d3220;background:#15110b}
+</style>
+</head>
+<body>
+  <h1>校园助手 · 三版界面演示（第二轮）</h1>
+  <p class="lead">
+    三版用的是<b>同一份真实数据</b>（你本机 2026-11-05 的课表 / 学习通 / 考试 / 通知 / 充电桩 / 校园卡缓存），
+    并且<b>桌面版的模块一个都没少</b>：今日、课表、考试、通知、任务、充电桩、设置全都在。
+    课表这轮是重点：不再是挤成一团的格子，而是先给「7 天概览」「按天分组」「日视图时间轴」这类可读排布，网格只作为备选视图。
+    手机或模拟器直接打开 <code>d1.html</code> / <code>d2.html</code> / <code>d3.html</code>；各版可用
+    <code>#table</code> <code>#task</code> <code>#notice</code> <code>#charger</code> <code>#exam</code> <code>#settings</code> 直达某页。
+  </p>
+
+  <div class="frames">
+    <div class="col">
+      <div class="ttl"><b>D1 · 周表优先</b><span>课表是主角</span></div>
+      <div class="frame"><iframe src="d1.html" title="D1"></iframe></div>
+      <div class="open"><a href="d1.html" target="_blank">单独打开 D1 ↗</a></div>
+    </div>
+    <div class="col">
+      <div class="ttl"><b>D2 · 宫格入口</b><span>功能平权</span></div>
+      <div class="frame"><iframe src="d2.html" title="D2"></iframe></div>
+      <div class="open"><a href="d2.html" target="_blank">单独打开 D2 ↗</a></div>
+    </div>
+    <div class="col">
+      <div class="ttl"><b>D3 · 信息流</b><span>一页读完所有事</span></div>
+      <div class="frame"><iframe src="d3.html" title="D3"></iframe></div>
+      <div class="open"><a href="d3.html" target="_blank">单独打开 D3 ↗</a></div>
+    </div>
+  </div>
+
+  <table>
+    <tr><th style="width:132px"></th><th>D1 周表优先</th><th>D2 宫格入口</th><th>D3 信息流</th></tr>
+    <tr><td>首页给你什么</td><td>今天的课表时间轴 + 随堂 + 截止 + 考试 + 余额</td><td><b>2×4 入口宫格</b>，每格带实时数字</td><td><b>一条纵向信息流</b> + 顶部锚点</td></tr>
+    <tr><td>课表主视图</td><td><b>7 天概览条 + 按天分组大卡</b></td><td><b>网格</b>（节次列吸顶、列宽更大、可横滑）</td><td><b>日视图时间轴</b> + 本周其他天摘要</td></tr>
+    <tr><td>课表能看多细</td><td>全名 + 教师 + 教室 + 节次，撞课两门都在</td><td>格内 2–3 行课名 + 教室，撞课有角标可单独点</td><td>一行一门课，信息最宽裕</td></tr>
+    <tr><td>找功能要几步</td><td>底栏 3 个 + 「更多」宫格，2 步</td><td><b>首页 1 步</b>直达任意模块</td><td>信息流里滚，或点「查看全部」</td></tr>
+    <tr><td>适合谁</td><td>每天先看一眼课表的人</td><td>功能用得多、想快速跳转的人</td><td>只想打开就知道「今天要干什么」的人</td></tr>
+    <tr><td>缺点</td><td>首页较长，功能藏在「更多」</td><td>首页是入口不是内容，要多点一下</td><td>信息流长了要靠锚点跳</td></tr>
+  </table>
+
+  <div class="tip warn">
+    <b>这轮补齐的桌面版细节（三版都有）：</b>课表撞课时另一门课也能单独点开看详情 ·
+    任务每行「✓ 完成」，点过就记在本机，刷新/重开不再出现（设置里可清除）· 周次可切、可「回到本周」·
+    通知按来源筛选、点开标已读 · 充电桩 13 个点位的空闲/总数/充电中/距离 · 8 场考试与倒计时 ·
+    校园卡余额 · 更新于时间与刷新按钮。
+  </div>
+
+  <div class="tip">
+    <b>参考来源：</b>「7 天概览条 + 按天分组 + 网格作为备选视图」这套课表排布，学自
+    <a href="https://github.com/lingion/sleepy">lingion/sleepy</a>（GPL-3.0，只学排布与配色规则，代码全部重写）；
+    课程配色沿用它的规范：<b>只按课名散列分配色相、避开主题色与补色带、饱和度明度全局统一</b>，
+    所以一屏里颜色不少但不刺眼。
+  </div>
+</body>
+</html>

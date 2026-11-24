@@ -1,0 +1,54 @@
+{
+  "name": "@haust/desktop",
+  "private": true,
+  "version": "0.1.4",
+  "description": "河科大校园助手",
+  "author": "haust-campus-app",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "node scripts/start.cjs",
+    "verify": "node scripts/verify.cjs",
+    "pack:dir": "electron-builder --win --dir",
+    "dist": "node scripts/dist.cjs --win nsis portable"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "cn.edu.haust.campusassistant",
+    "productName": "河科大校园助手",
+    "directories": {
+      "output": "release",
+      "buildResources": "build-res"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../../apps/web/dist",
+        "to": "web"
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "shortcutName": "河科大校园助手",
+      "artifactName": "河科大校园助手-${version}-安装版.${ext}"
+    },
+    "portable": {
+      "artifactName": "河科大校园助手-${version}-便携版.${ext}"
+    }
+  }
+}

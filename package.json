@@ -1,0 +1,12 @@
+{
+  "name": "haust-campus-app",
+  "private": true,
+  "version": "0.1.1",
+  "description": "河南科技大学校园助手（本地运行，数据不出本机）",
+  "scripts": {
+    "build:web": "pnpm --filter @haust/web build",
+    "start": "pnpm build:web && pnpm --filter @haust/desktop start",
+    "verify": "pnpm build:web && pnpm --filter @haust/desktop verify",
+    "dev:web": "pnpm --filter @haust/web dev"
+  }
+}
