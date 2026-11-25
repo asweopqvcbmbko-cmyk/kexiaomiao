@@ -1048,9 +1048,15 @@ export const androidApi = {
     single('notices', () =>
       withEngine(async () => {
         const existingKeys = await getAllNoticeKeys().catch(() => new Set<string>())
+        const collegeIds = readSubscribedColleges()
+        const run = () => notices.fetchList(engine, { existingKeys, collegeIds })
         try {
-          const collegeIds = readSubscribedColleges()
-          const data = await notices.fetchList(engine, { existingKeys, collegeIds })
+          let data = await run()
+          if (data?.authRequired || data?.portalAuthRequired) {
+            if (await recoverSession()) {
+              data = await run().catch(() => data)
+            }
+          }
           const fetchedItems = Array.isArray(data?.items) ? data.items : []
           log('notices', fetchedItems.length, 'existing:', existingKeys.size)
           if (fetchedItems.length > 0) {
@@ -1073,6 +1079,18 @@ export const androidApi = {
         } catch (e: any) {
           const isAuth = e instanceof WebVpnAuthError || e?.code === 'WEBVPN_AUTH_REQUIRED'
           log('notices FAIL', isAuth ? 'WebVpnAuthError' : (e && e.message))
+          if (isAuth && (await recoverSession())) {
+            try {
+              const again = await run()
+              const retryItems = Array.isArray(again?.items) ? again.items : []
+              if (retryItems.length > 0) {
+                const merged = await upsertNotices(retryItems)
+                const authRequired = !!(again?.authRequired || again?.portalAuthRequired)
+                write('notices', { fetchedAt: again.fetchedAt, items: merged.slice(0, 60) })
+                return { fetchedAt: again.fetchedAt, items: merged, stale: false, authRequired }
+              }
+            } catch (_) {}
+          }
           const persisted = await getAllNotices()
           if (persisted.length > 0) {
             return {
@@ -1101,7 +1119,10 @@ export const androidApi = {
     if (cachedBody) return cachedBody
     return withEngine(async () => {
       try {
-        const res = await notices.fetchBody(engine, item)
+        let res = await notices.fetchBody(engine, item)
+        if (res?.failure === 'auth' && (await recoverSession())) {
+          res = await notices.fetchBody(engine, item).catch(() => res)
+        }
         if (res && !res.failure) {
           await saveNoticeBody(item, res).catch(() => {})
         }

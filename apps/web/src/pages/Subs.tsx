@@ -247,7 +247,13 @@ export function NoticesPage(props: {
             })}
           </div>
         </section>
-      )) : props.items.length > 0 && filtered ? (
+      )) : props.refreshing ? (
+        <Empty
+          title={getCollegeById(activeSource) ? `正在同步${getCollegeById(activeSource)?.shortName}通知…` : '正在同步校园通知…'}
+          sub="首次拉取新订阅学院通常需要 1–3 秒，请稍候。"
+          icon="bell"
+        />
+      ) : props.items.length > 0 && filtered ? (
         <Empty title={activeSource === 'unread' && !term ? '没有未读通知' : '没有匹配的通知'} icon="bell">
           <button className="softbtn notice-clear-filters" type="button" onClick={clearFilters}>清除筛选</button>
         </Empty>

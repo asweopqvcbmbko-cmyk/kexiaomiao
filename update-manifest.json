@@ -1,19 +1,19 @@
 {
-    "updatedAt":  "2026-11-25T03:37:34Z",
+    "updatedAt":  "2026-11-25T04:01:49Z",
     "schemaVersion":  1,
     "beta":  {
                  "mirrors":  [
-                                 "https://edgeone.gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2-beta.3/kexiaomiao-v0.2.2-beta.3.apk",
-                                 "https://gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2-beta.3/kexiaomiao-v0.2.2-beta.3.apk"
+                                 "https://edgeone.gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2-beta.4/kexiaomiao-v0.2.2-beta.4.apk",
+                                 "https://gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2-beta.4/kexiaomiao-v0.2.2-beta.4.apk"
                              ],
-                 "apkUrl":  "https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2-beta.3/kexiaomiao-v0.2.2-beta.3.apk",
-                 "size":  3381083,
-                 "notes":  "1. 仪表盘「进度」页改为未完成低进度优先排序，100% 已完成自动折叠到底部，并支持 iOS 风格左滑露出「忽略 → 确认忽略」两步防误触快速忽略；2. 修复仪表盘蓝色焦点卡倒计时单位对比度；3. 校园通知页重构为极简杂志风：去掉多余返回键与重复订阅按钮，页头仅留 [搜索 / 学院 / 刷新]，搜索栏按需展开，「未读」融合进纯净频道栏，列表按 今天 / 近 7 天 / 更早 时间分组整卡呈现。",
-                 "publishedAt":  "2026-11-25T03:37:34Z",
-                 "sha256":  "36ff7cb978e649d4212e408178825d6620782a8936e1b1473bdb2b3dc069f426",
+                 "apkUrl":  "https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2-beta.4/kexiaomiao-v0.2.2-beta.4.apk",
+                 "size":  3381267,
+                 "notes":  "1. 校园通知列表与正文全面接入校园网/WebVPN 后台静默续登；2. 移除通知页顶部残留的重复订阅按钮，新增学院拉取期间显示清爽同步加载态；3. 修复仪表盘左滑忽略用力拉动露白边及文字居中对齐问题。",
+                 "publishedAt":  "2026-11-25T04:01:49Z",
+                 "sha256":  "dd4e4ba6bf2d83035dd28b2dc6d079997da78f6bbe4bec4bb962a0e4bf283f0c",
                  "channel":  "beta",
-                 "versionName":  "0.2.2-beta.3",
-                 "versionCode":  19
+                 "versionName":  "0.2.2-beta.4",
+                 "versionCode":  20
              },
     "stable":  {
                    "mirrors":  [

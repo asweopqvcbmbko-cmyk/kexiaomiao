@@ -1317,33 +1317,20 @@ export default function App() {
   const body = (() => {
     if (tab === 'notices' && !sub)
       return (
-        <>
-          {(isConnected() || demoMode) && (
-            <div className="filterbar">
-              <button type="button" className="mark-all-btn" onClick={() => setModal({
-                kind: 'collegeSubscriptions',
-                draft: subscribedColleges
-              })}>
-                学院通知订阅
-              </button>
-            </div>
-          )}
-          <NoticesPage
-            key={subscribedColleges.join(',')}
-            items={visibleNotices}
-            readIds={readIds}
-            stale={noticesStale}
-            authRequired={noticesAuthRequired && !demoMode}
-            refreshing={refreshing}
-            subscribedColleges={subscribedColleges}
-            onChangeSubscribedColleges={handleChangeSubscribedColleges}
-            onRefresh={manualRefresh}
-            onBack={() => go('home')}
-            onOpen={openNotice}
-            onMarkAllRead={markAllNoticesRead}
-            onLogin={onLoginTap}
-          />
-        </>
+        <NoticesPage
+          items={visibleNotices}
+          readIds={readIds}
+          stale={noticesStale}
+          authRequired={noticesAuthRequired && !demoMode}
+          refreshing={refreshing}
+          subscribedColleges={subscribedColleges}
+          onChangeSubscribedColleges={handleChangeSubscribedColleges}
+          onRefresh={manualRefresh}
+          onBack={() => go('home')}
+          onOpen={openNotice}
+          onMarkAllRead={markAllNoticesRead}
+          onLogin={onLoginTap}
+        />
       )
     if (sub === 'chargers')
       return chView ? (

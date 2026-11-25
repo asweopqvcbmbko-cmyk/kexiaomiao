@@ -249,6 +249,7 @@ function SwipeProgressCard({ item, cardKey, isOpen, confirming, onSwipeStart, on
         ref={actionRef}
         type="button"
         className={`dash-swipe-action${confirming ? ' is-confirming' : ''}`}
+        style={{ width: Math.max(swipeReveal, Math.round(Math.abs(dragOffset ?? (isOpen ? -swipeReveal : 0))) + 20) }}
         aria-hidden={!isOpen}
         tabIndex={isOpen ? 0 : -1}
         onClick={() => { if (isOpen) onIgnore() }}
