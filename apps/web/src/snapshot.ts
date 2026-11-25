@@ -8,7 +8,7 @@ import type { AirconElectricityResult, AirconRoom } from './types/aircon-electri
 export type AppTab = 'home' | 'dashboard' | 'notices' | 'profile'
 export type CardKey = 'focus' | 'exam' | 'notices' | 'aircon' | 'chargers' | 'card'
 
-export const ONBOARDING_VERSION_KEY = 'haust:onboarding_v1'
+export const ONBOARDING_VERSION_KEY = 'haust:onboarding_v2'
 export const DEMO_MODE_KEY = 'haust:demo_mode'
 export const DEMO_TIP_KEY = 'haust:demo_tip_v1'
 export const UI_STATE_KEY = 'haust:ui_state_v1'
@@ -41,6 +41,7 @@ export type HomeSnapshot = {
 
 export type BootState = {
   showOnboarding: boolean
+  onboardingReplay: boolean
   demoMode: boolean
   showDemoTip: boolean
   savedTab: AppTab
@@ -167,6 +168,7 @@ export function readBootState(): BootState {
   if (isDevPreview) {
     return {
       showOnboarding: false,
+      onboardingReplay: false,
       demoMode: false,
       showDemoTip: false,
       savedTab: 'home',
@@ -184,11 +186,6 @@ export function readBootState(): BootState {
   } catch (_) {}
 
   const hasUser = hasExistingUserConfig()
-  if (!completed && hasUser) {
-    // 老用户升级无缝兼容：自动标记引导已完成，不打扰
-    completed = true
-    markOnboardingCompleted()
-  }
 
   // 若已有真实账号/宿舍配置，不再停留在演示模式
   if (hasUser && demoMode) {
@@ -196,14 +193,17 @@ export function readBootState(): BootState {
     setDemoModeFlag(false)
   }
 
+  // v0.2.2 全新 6 步互动新手引导：首次升级上来的老用户以非破坏性回看模式体验一次（不清空数据）
   const showOnboarding = !completed
-  const snapshot = !showOnboarding && !demoMode ? readHomeSnapshot() : null
+  const onboardingReplay = showOnboarding && hasUser
+  const snapshot = (!showOnboarding || onboardingReplay) && !demoMode ? readHomeSnapshot() : null
 
   return {
     showOnboarding,
+    onboardingReplay,
     demoMode: !showOnboarding && demoMode,
     showDemoTip: !showOnboarding && demoMode && !tipDismissed,
-    savedTab: showOnboarding ? 'home' : readSavedTab(),
+    savedTab: showOnboarding && !onboardingReplay ? 'home' : readSavedTab(),
     snapshot
   }
 }

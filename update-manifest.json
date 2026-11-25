@@ -1,5 +1,5 @@
 {
-    "updatedAt":  "2026-11-25T05:09:40Z",
+    "updatedAt":  "2026-11-25T05:13:05Z",
     "schemaVersion":  1,
     "beta":  {
                  "mirrors":  [
@@ -17,17 +17,17 @@
              },
     "stable":  {
                    "mirrors":  [
-                                   "https://edgeone.gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.1/kexiaomiao-v0.2.1.apk",
-                                   "https://gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.1/kexiaomiao-v0.2.1.apk"
+                                   "https://edgeone.gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2/kexiaomiao-v0.2.2.apk",
+                                   "https://gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2/kexiaomiao-v0.2.2.apk"
                                ],
-                   "apkUrl":  "https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.1/kexiaomiao-v0.2.1.apk",
-                   "size":  3372843,
-                   "notes":  "科小喵 v0.2.1 正式版\n1. 更换全新「科小喵」专属品牌图标（全套自适应防裁切高清图标）\n2. 桌面应用名正式升级为「科小喵」",
-                   "publishedAt":  "2026-11-24T15:30:02Z",
-                   "sha256":  "2ba03e495466dbcf321fd0e3b31297a7d0e78ceb22fc9935bd7baeca302af67f",
+                   "apkUrl":  "https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2/kexiaomiao-v0.2.2.apk",
+                   "size":  3398195,
+                   "notes":  "1. 全面升级无感续登：Android Keystore 本机加密保存教务与学习通凭据，云端更新及多端挤下线后自动后台静默重登\n2. 校园通知重磅升级：覆盖河科大全部 30 个学院/书院（支持多选订阅），升级原生 HTTP 全源并发直连（提速 10–20×），全新极简分组排版\n3. 课程表全面重构：新增 1–20 周快速选周、丝滑日/周切换并记忆偏好、日视图实时上课高亮、周视图一屏自适应智能周末折叠（5/7 列）与当前时间线\n4. 学习通仪表盘优化：修复完整课程名与冷启动快照，低进度优先展示 + 100% 折叠 + 弹性左滑两步忽略旧学期课程\n5. 全新界面美学：澎湃 4「光感玻璃」悬浮底栏、「我的」极光流光 Hero 卡片矩阵、6 步开机 OOBE 互动新手引导（本次升级后可体验一次，不清空数据）\n6. 体验修复：禁用 Android 系统果冻过滚变形，修复跨版本更新日志聚合与默认跟随系统外观",
+                   "publishedAt":  "2026-11-25T05:13:05Z",
+                   "sha256":  "540f5f760258136783bac32e35c21064ed5b2e037ab32ee1c7bc1262a0097d6e",
                    "channel":  "stable",
-                   "versionName":  "0.2.1",
-                   "versionCode":  16
+                   "versionName":  "0.2.2",
+                   "versionCode":  24
                },
     "changelog":  [
                       {
@@ -37,10 +37,10 @@
                           "notes":  "更名为「科小喵」，更换全新品牌启动图标与统一视觉风格"
                       },
                       {
-                          "channel":  "beta",
-                          "versionCode":  23,
-                          "versionName":  "0.2.2-beta.7",
-                          "notes":  "1. 升级为澎湃 4「光感玻璃」悬浮底栏，带高透磨砂与滑动光感胶囊\n2. 禁用 Android 12+ WebView 系统果冻拉伸，修复下拉变形\n3. 修复新课程表点击非今日课程无法弹出详情页的 Bug\n4. 新增跨版本更新日志自动聚合能力"
+                          "channel":  "stable",
+                          "versionCode":  24,
+                          "versionName":  "0.2.2",
+                          "notes":  "1. 全面升级无感续登：Android Keystore 本机加密保存教务与学习通凭据，云端更新及多端挤下线后自动后台静默重登\n2. 校园通知重磅升级：覆盖河科大全部 30 个学院/书院（支持多选订阅），升级原生 HTTP 全源并发直连（提速 10–20×），全新极简分组排版\n3. 课程表全面重构：新增 1–20 周快速选周、丝滑日/周切换并记忆偏好、日视图实时上课高亮、周视图一屏自适应智能周末折叠（5/7 列）与当前时间线\n4. 学习通仪表盘优化：修复完整课程名与冷启动快照，低进度优先展示 + 100% 折叠 + 弹性左滑两步忽略旧学期课程\n5. 全新界面美学：澎湃 4「光感玻璃」悬浮底栏、「我的」极光流光 Hero 卡片矩阵、6 步开机 OOBE 互动新手引导（本次升级后可体验一次，不清空数据）\n6. 体验修复：禁用 Android 系统果冻过滚变形，修复跨版本更新日志聚合与默认跟随系统外观"
                       }
                   ]
 }

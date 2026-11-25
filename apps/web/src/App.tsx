@@ -119,7 +119,7 @@ export default function App() {
   const [initialDemo] = useState(() => (boot.demoMode ? buildDemoBundle() : null))
   const [onboardingOpen, setOnboardingOpen] = useState<boolean>(boot.showOnboarding)
   const [onboardingStep, setOnboardingStep] = useState<number>(0)
-  const [onboardingReplay, setOnboardingReplay] = useState<boolean>(false)
+  const [onboardingReplay, setOnboardingReplay] = useState<boolean>(boot.onboardingReplay)
   const [demoMode, setDemoMode] = useState<boolean>(boot.demoMode)
   const [showDemoTip, setShowDemoTip] = useState<boolean>(boot.showDemoTip)
 
@@ -1064,6 +1064,7 @@ export default function App() {
 
   const handleOnboardingSkip = useCallback(() => {
     if (onboardingReplay) {
+      markOnboardingCompleted()
       setOnboardingOpen(false)
       setOnboardingReplay(false)
       return
