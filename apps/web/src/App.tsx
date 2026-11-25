@@ -27,6 +27,9 @@ import { Schedule } from './pages/Schedule'
 import { Profile } from './pages/Profile'
 import { CardPage, ChargersPage, ExamPage, NoticesPage } from './pages/Subs'
 import { data, events, isConnected, isNativePlatform, supportsChaoxing, supportsNativeAuth } from './api'
+import {
+  COLLEGES, MAX_SUBSCRIBED_COLLEGES, isCollegeSource, readSubscribedColleges, writeSubscribedColleges
+} from './college-notices'
 import { buildDemoBundle, buildDemoChaoxingDashboard, getDemoNoticeBody } from './demoData'
 import {
   SWR_FAST_TTL_MS,
@@ -132,6 +135,8 @@ export default function App() {
   const [table, setTable] = useState<CourseTable | null>(() => initialDemo?.table ?? boot.snapshot?.table ?? null)
   const [exams, setExams] = useState<Exam[]>(() => initialDemo?.exams ?? boot.snapshot?.exams ?? [])
   const [notices, setNotices] = useState<NoticeItem[]>(() => initialDemo?.notices ?? boot.snapshot?.notices ?? [])
+  const [subscribedColleges, setSubscribedColleges] = useState<string[]>(() => readSubscribedColleges())
+  const noticeSubscriptionRevision = useRef(0)
   const [noticesStale, setNoticesStale] = useState(false)
   const [noticesAuthRequired, setNoticesAuthRequired] = useState(false)
   const [chargers, setChargers] = useState<ChargerData | null>(() => initialDemo?.chargers ?? boot.snapshot?.chargers ?? null)
@@ -208,6 +213,7 @@ export default function App() {
     | { kind: 'course'; id: string }
     | { kind: 'conflict'; id?: string }
     | { kind: 'notice'; item: NoticeItem }
+    | { kind: 'collegeSubscriptions'; draft: string[] }
     | { kind: 'theme' }
     | { kind: 'aircon' }
     | { kind: 'about' }
@@ -453,15 +459,17 @@ export default function App() {
     if (needNotices) {
       if (force) setSyncStage('notices')
       setSwrCards((prev) => ({ ...prev, notices: true }))
+      const subscriptionRevision = noticeSubscriptionRevision.current
       try {
         const nt = await data.notices()
-        if (demoModeRef.current) return
+        if (demoModeRef.current || session !== schoolSession.current) return
         if (nt) {
           const items = nt.items || []
           setNotices(items)
           setNoticesStale(!!nt.stale)
           setNoticesAuthRequired(!!((nt as any).authRequired || (nt as any).portalAuthRequired))
-          times.notices = Date.now()
+          // 订阅保存后，旧请求完成时须保留待刷新的状态。
+          if (subscriptionRevision === noticeSubscriptionRevision.current) times.notices = Date.now()
           updateFingerprint('notices', fingerprintNotices(items), true)
         }
         didAny = true
@@ -522,6 +530,14 @@ export default function App() {
     refreshingRef.current = run
     return run
   }, [runRefreshOnce])
+
+  const handleChangeSubscribedColleges = (nextIds: string[]) => {
+    setSubscribedColleges(writeSubscribedColleges(nextIds))
+    if (demoModeRef.current) return
+    noticeSubscriptionRevision.current += 1
+    syncTimesRef.current.notices = 0
+    void refreshAll({ force: false })
+  }
 
   const manualRefresh = () => {
     if (demoMode) {
@@ -692,21 +708,25 @@ export default function App() {
 
   const chView = useMemo(() => chargerView(chargers), [chargers])
   const cdView = useMemo(() => cardView(card), [card])
-  const unread = useMemo(() => notices.filter((n) => !readIds.includes(`${n.source}:${n.id}`)).length, [notices, readIds])
+  const visibleNotices = useMemo(
+    () => demoMode ? notices : notices.filter((n) => !isCollegeSource(n.source) || subscribedColleges.includes(n.source)),
+    [demoMode, notices, subscribedColleges]
+  )
+  const unread = useMemo(() => visibleNotices.filter((n) => !readIds.includes(`${n.source}:${n.id}`)).length, [visibleNotices, readIds])
 
 
   const unreadNotices = useMemo(
     () =>
-      [...notices]
+      visibleNotices
         .filter((n) => !readIds.includes(`${n.source}:${n.id}`))
         .sort((a, b) => (Date.parse(b.date) || 0) - (Date.parse(a.date) || 0))
         .slice(0, 3),
-    [notices, readIds]
+    [visibleNotices, readIds]
   )
 
-  const latestNoticeTitles = useMemo(() => [...notices]
+  const latestNoticeTitles = useMemo(() => [...visibleNotices]
     .sort((a, b) => (Date.parse(b.date) || 0) - (Date.parse(a.date) || 0))
-    .slice(0, 2).map((item) => item.title), [notices])
+    .slice(0, 2).map((item) => item.title), [visibleNotices])
 
   /* ---------------- 日期 ---------------- */
   const dateFor = useCallback(
@@ -760,12 +780,12 @@ export default function App() {
   )
 
   const markAllNoticesRead = useCallback(() => {
-    if (!notices.length) return
-    const next = Array.from(new Set([...readIds, ...notices.map((n) => `${n.source}:${n.id}`)]))
+    if (!visibleNotices.length) return
+    const next = Array.from(new Set([...readIds, ...visibleNotices.map((n) => `${n.source}:${n.id}`)]))
     setReadIds(next)
     lsSet(READ_KEY, next)
     toast('已将全部通知标为已读')
-  }, [notices, readIds, toast])
+  }, [visibleNotices, readIds, toast])
 
   useEffect(() => {
     if (modal?.kind !== 'notice') noticeRequestId.current += 1
@@ -1067,6 +1087,44 @@ export default function App() {
 
   const renderModal = () => {
     if (!modal) return null
+    if (modal.kind === 'collegeSubscriptions') {
+      const { draft } = modal
+      const colleges = isNativePlatform() || demoMode
+        ? COLLEGES
+        : COLLEGES.filter(({ id }) => id === 'cl' || subscribedColleges.includes(id))
+      return (
+        <Modal title="学院通知订阅" onClose={() => setModal(null)}>
+          <p>已选 {draft.length} / {MAX_SUBSCRIBED_COLLEGES}</p>
+          <div className="filterbar" style={{ flexWrap: 'wrap' }}>
+            {colleges.map(({ id, shortName, fullName }) => {
+              const selected = draft.includes(id)
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  className={`chip${selected ? ' selected' : ''}`}
+                  title={fullName}
+                  aria-pressed={selected}
+                  disabled={!selected && draft.length >= MAX_SUBSCRIBED_COLLEGES}
+                  onClick={() => setModal({
+                    kind: 'collegeSubscriptions',
+                    draft: selected ? draft.filter((item) => item !== id) : [...draft, id]
+                  })}
+                >
+                  {shortName}
+                </button>
+              )
+            })}
+          </div>
+          <button type="button" className="mark-all-btn" onClick={() => {
+            if (draft.join(',') !== subscribedColleges.join(',')) handleChangeSubscribedColleges(draft)
+            setModal(null)
+          }}>
+            保存订阅
+          </button>
+        </Modal>
+      )
+    }
     if (modal.kind === 'aircon') {
       const openWoIHaust = async () => {
         const res = await data.launchApp('com.lantu.MobileCampus.haust')
@@ -1259,18 +1317,33 @@ export default function App() {
   const body = (() => {
     if (tab === 'notices' && !sub)
       return (
-        <NoticesPage
-          items={notices}
-          readIds={readIds}
-          stale={noticesStale}
-          authRequired={noticesAuthRequired && !demoMode}
-          refreshing={refreshing}
-          onRefresh={manualRefresh}
-          onBack={() => go('home')}
-          onOpen={openNotice}
-          onMarkAllRead={markAllNoticesRead}
-          onLogin={onLoginTap}
-        />
+        <>
+          {(isConnected() || demoMode) && (
+            <div className="filterbar">
+              <button type="button" className="mark-all-btn" onClick={() => setModal({
+                kind: 'collegeSubscriptions',
+                draft: subscribedColleges
+              })}>
+                学院通知订阅
+              </button>
+            </div>
+          )}
+          <NoticesPage
+            key={subscribedColleges.join(',')}
+            items={visibleNotices}
+            readIds={readIds}
+            stale={noticesStale}
+            authRequired={noticesAuthRequired && !demoMode}
+            refreshing={refreshing}
+            subscribedColleges={subscribedColleges}
+            onChangeSubscribedColleges={handleChangeSubscribedColleges}
+            onRefresh={manualRefresh}
+            onBack={() => go('home')}
+            onOpen={openNotice}
+            onMarkAllRead={markAllNoticesRead}
+            onLogin={onLoginTap}
+          />
+        </>
       )
     if (sub === 'chargers')
       return chView ? (

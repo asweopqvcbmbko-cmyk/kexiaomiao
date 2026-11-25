@@ -19,6 +19,7 @@ import {
 } from './lib/auth-flow'
 import { CHAOXING_LAST_ACCOUNT_KEY, driveChaoxingAuth, isChaoxingDestination, rememberChaoxingAccount } from './lib/chaoxing-auth'
 import { readChaoxingSnapshot } from '../snapshot'
+import { readSubscribedColleges } from '../college-notices'
 import { createCloudPaymentSession } from '../../../desktop/src/lib/aircon-session.mjs'
 import {
   WebVpnAuthError,
@@ -1048,7 +1049,8 @@ export const androidApi = {
       withEngine(async () => {
         const existingKeys = await getAllNoticeKeys().catch(() => new Set<string>())
         try {
-          const data = await notices.fetchList(engine, { existingKeys })
+          const collegeIds = readSubscribedColleges()
+          const data = await notices.fetchList(engine, { existingKeys, collegeIds })
           const fetchedItems = Array.isArray(data?.items) ? data.items : []
           log('notices', fetchedItems.length, 'existing:', existingKeys.size)
           if (fetchedItems.length > 0) {

@@ -1,7 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Icon } from '../icons'
 import { PageHeader, Empty } from '../components/ui'
+import { CollegePickerModal } from '../components/CollegePickerModal'
 import { daysUntil, noticeDate, openAtLabel, type chargerView } from '../adapters'
+import { getCollegeById, getSubscribedCollegeSources, readSubscribedColleges, writeSubscribedColleges } from '../college-notices'
+import { haptic } from '../haptics'
 import type { Exam, NoticeItem } from '../types'
 
 /** 子页外壳：与主页面同样的 topbar，多一个返回按钮 */
@@ -33,6 +36,13 @@ function SubShell(props: {
   )
 }
 
+const CORE_NOTICE_FILTERS = [
+  { id: 'all', shortName: '全部' },
+  { id: 'jwc', shortName: '教务处' },
+  { id: 'school', shortName: '全校通知' },
+  { id: 'news', shortName: '校园新闻' }
+]
+
 export function NoticesPage(props: {
   items: NoticeItem[]
   readIds: string[]
@@ -47,15 +57,47 @@ export function NoticesPage(props: {
   onMarkAllRead: () => void
   onLogin?: () => void
 }) {
-  const sources = useMemo(() => {
-    const map = new Map<string, string>()
-    for (const n of props.items) map.set(n.source, n.sourceName || n.source)
-    return Array.from(map.entries())
-  }, [props.items])
+  const [savedColleges, setSavedColleges] = useState(readSubscribedColleges)
+  const subscribedColleges = props.subscribedColleges ?? savedColleges
+  const collegeSources = getSubscribedCollegeSources(subscribedColleges)
+  const sources = [...CORE_NOTICE_FILTERS, ...collegeSources]
   const [src, setSrc] = useState('all')
+  const [query, setQuery] = useState('')
+  const [unreadOnly, setUnreadOnly] = useState(false)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const searchInput = useRef<HTMLInputElement>(null)
+  const activeSource = sources.some(({ id }) => id === src) ? src : 'all'
+  const term = query.trim().toLowerCase()
 
-  const list = props.items.filter((n) => src === 'all' || n.source === src).slice(0, 100)
-  const unread = props.items.filter((n) => !props.readIds.includes(`${n.source}:${n.id}`)).length
+  const readIds = useMemo(() => new Set(props.readIds), [props.readIds])
+  const unreadSources = new Set<string>()
+  let unread = 0
+  for (const n of props.items) {
+    if (readIds.has(`${n.source}:${n.id}`)) continue
+    unread += 1
+    unreadSources.add(n.source)
+  }
+
+  const list = props.items.filter((n) =>
+    (activeSource === 'all' || n.source === activeSource) &&
+    (!unreadOnly || !readIds.has(`${n.source}:${n.id}`)) &&
+    (!term || [n.title, n.dept, n.sourceName].some((value) => value?.toLowerCase().includes(term)))
+  ).slice(0, 100)
+  const filtered = Boolean(term || unreadOnly || activeSource !== 'all')
+
+  function clearFilters() {
+    haptic('light')
+    setSrc('all')
+    setUnreadOnly(false)
+    setQuery('')
+  }
+
+  function saveColleges(ids: string[]) {
+    if (props.subscribedColleges === undefined) setSavedColleges(writeSubscribedColleges(ids))
+    props.onChangeSubscribedColleges?.(ids)
+    if (getCollegeById(src) && !ids.includes(src)) setSrc('all')
+    setPickerOpen(false)
+  }
 
   return (
     <SubShell
@@ -90,45 +132,113 @@ export function NoticesPage(props: {
         <div className="card" style={{ padding: '12px 16px', marginBottom: 14, fontSize: 12 }}>当前显示的是本地离线缓存，刚才刷新失败。</div>
       ) : null}
 
-      {sources.length > 1 ? (
-        <div className="filterbar">
-          <button className={`chip${src === 'all' ? ' selected' : ''}`} onClick={() => setSrc('all')}>
-            全部
+      <div className="card notice-toolbar">
+        <div className="notice-toolbar-row">
+          <div className="notice-search notice-search-with-clear">
+            <span className="notice-search-icon" aria-hidden="true" />
+            <input
+              ref={searchInput}
+              type="search"
+              aria-label="搜索通知标题或发布部门"
+              placeholder="搜索通知标题或发布部门…"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+            {query && (
+              <button className="notice-search-clear" type="button" aria-label="清除搜索" onClick={() => {
+                setQuery('')
+                searchInput.current?.focus()
+              }}>×</button>
+            )}
+          </div>
+          <button
+            className="notice-unread-toggle"
+            type="button"
+            aria-pressed={unreadOnly}
+            onClick={() => {
+              haptic('light')
+              setUnreadOnly((current) => !current)
+            }}
+          >
+            仅看未读 <span>{unread}</span>
           </button>
-          {sources.map(([k, name]) => (
-            <button key={k} className={`chip${src === k ? ' selected' : ''}`} onClick={() => setSrc(k)}>
-              {name}
-            </button>
-          ))}
         </div>
-      ) : null}
+        <div className="notice-source-controls">
+          <div className="filterbar notice-filterbar" role="group" aria-label="筛选通知来源">
+            {sources.map(({ id, shortName }) => {
+              const hasUnread = id === 'all' ? unread > 0 : unreadSources.has(id)
+              return (
+                <button
+                  className={`chip${activeSource === id ? ' selected' : ''}`}
+                  type="button"
+                  key={id}
+                  aria-pressed={activeSource === id}
+                  aria-label={hasUnread ? `${shortName}，有未读通知` : undefined}
+                  onClick={() => {
+                    if (activeSource !== id) haptic('light')
+                    setSrc(id)
+                  }}
+                >
+                  {getCollegeById(id) && <i className="notice-college-dot" aria-hidden="true" />}
+                  {shortName}
+                  {hasUnread && <i className="notice-filter-dot" aria-hidden="true" />}
+                </button>
+              )
+            })}
+          </div>
+          <button className="softbtn notice-manage-colleges" type="button" onClick={() => setPickerOpen(true)}>
+            {collegeSources.length ? `学院(${collegeSources.length})` : '+ 订阅学院'}
+          </button>
+        </div>
+      </div>
+
+      {subscribedColleges.length === 0 && (
+        <div className="card notice-college-cta">
+          <span className="notice-college-cta-icon"><Icon name="cap" /></span>
+          <div>
+            <strong>还没订阅你的学院？</strong>
+            <small>支持全校 30 个学院与书院，点此一键订阅</small>
+          </div>
+          <button className="softbtn" type="button" onClick={() => setPickerOpen(true)}>去订阅</button>
+        </div>
+      )}
 
       {list.length ? (
-        <div className="card noticebox">
+        <div className="notice-card-list">
           {list.map((n) => {
-            const read = props.readIds.includes(`${n.source}:${n.id}`)
+            const key = `${n.source}:${n.id}`
+            const read = readIds.has(key)
+            const college = getCollegeById(n.source)
+            const core = CORE_NOTICE_FILTERS.find(({ id }) => id !== 'all' && id === n.source)
+            const sourceName = n.sourceName?.trim() || college?.shortName || core?.shortName || n.source
+            const dept = n.dept?.trim()
+            const variant = college ? ' src-college' : core ? ` src-${core.id}` : ''
             return (
-              <button className={`notice${read ? ' is-read' : ''}`} key={`${n.source}:${n.id}`} onClick={() => props.onOpen(n)}>
-                <div className="notice-icon">
-                  <Icon name="bell" />
-                  {!read ? <i className="unread-dot" aria-label="未读" /> : null}
-                </div>
-                <div style={{ minWidth: 0 }}>
-                  <h3>{n.title}</h3>
-                  <small>
-                    {n.sourceName} · {noticeDate(n)}
-                    {read ? ' · 已读' : ' · 未读'}
-                  </small>
-                </div>
-                <Icon name="arrow" className="arrow" />
+              <button className={`card notice notice-card-row${read ? ' is-read' : ''}`} type="button" key={key} onClick={() => props.onOpen(n)}>
+                <span className="notice-card-meta">
+                  <span className={`notice-source-badge${variant}`}>{sourceName}</span>
+                  <span className="notice-card-date">{noticeDate(n)}</span>
+                </span>
+                <span className="notice-card-title">
+                  <span className="notice-read-status">{read ? '已读：' : '未读：'}</span>
+                  {n.title}
+                </span>
+                {dept && dept !== sourceName && <span className="notice-card-dept">{dept}</span>}
               </button>
             )
           })}
         </div>
+      ) : props.items.length > 0 && filtered ? (
+        <Empty title="没有匹配搜索条件的通知" icon="bell">
+          <button className="softbtn notice-clear-filters" type="button" onClick={clearFilters}>清除筛选</button>
+        </Empty>
       ) : (
         <Empty title="没有取到通知" sub="检查网络或稍后刷新。" icon="bell" />
       )}
       <p className="footer-note">正文按需拉取并自动离线缓存在本机 · 已读状态本地保存</p>
+      {pickerOpen && (
+        <CollegePickerModal selected={subscribedColleges} onSave={saveColleges} onClose={() => setPickerOpen(false)} />
+      )}
     </SubShell>
   )
 }

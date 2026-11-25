@@ -1,19 +1,19 @@
 {
-    "updatedAt":  "2026-11-25T02:24:47Z",
+    "updatedAt":  "2026-11-25T03:05:16Z",
     "schemaVersion":  1,
     "beta":  {
                  "mirrors":  [
-                                 "https://edgeone.gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2-beta.1/kexiaomiao-v0.2.2-beta.1.apk",
-                                 "https://gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2-beta.1/kexiaomiao-v0.2.2-beta.1.apk"
+                                 "https://edgeone.gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2-beta.2/kexiaomiao-v0.2.2-beta.2.apk",
+                                 "https://gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2-beta.2/kexiaomiao-v0.2.2-beta.2.apk"
                              ],
-                 "apkUrl":  "https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2-beta.1/kexiaomiao-v0.2.2-beta.1.apk",
-                 "size":  3373611,
-                 "notes":  "1. 教务与学习通默认本机 Keystore 加密保存凭据，过期或异端登录被踢时后台全静默无感续登；2. 修复学习通缓存 Key 偏差与过期变空白问题，冷启动与断网均优先展示缓存；3. 修复仪表盘设置弹窗遮罩错位与课程列表无法下滑；4. 移除宿舍绑定多余的搜索房间输入框；5. 首次安装默认跟随系统主题并更新新版新手引导。",
-                 "publishedAt":  "2026-11-25T02:24:47Z",
-                 "sha256":  "0643da3eb4005354e8d64d8ee8f304632f451f5e0dddfb499edd70f164918917",
+                 "apkUrl":  "https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2-beta.2/kexiaomiao-v0.2.2-beta.2.apk",
+                 "size":  3378851,
+                 "notes":  "1. 新增全校 30 个学院/学部/书院通知自由多选订阅（上限 5 个，仅抓取已订阅学院，单院超时隔离）；2. 通知页全面重构为现代卡片分层风（关键字搜索、仅看未读、彩色来源徽章、按学部/书院分组订阅弹窗）；3. 修复学习通仪表盘与设置页课程名称截断问题，完整展示全部课程名。",
+                 "publishedAt":  "2026-11-25T03:05:16Z",
+                 "sha256":  "99013933d378083e5bd33d4fb1471495a2a9302f466300347edbf11cf6369717",
                  "channel":  "beta",
-                 "versionName":  "0.2.2-beta.1",
-                 "versionCode":  17
+                 "versionName":  "0.2.2-beta.2",
+                 "versionCode":  18
              },
     "stable":  {
                    "mirrors":  [

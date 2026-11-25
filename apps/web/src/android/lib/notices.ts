@@ -1,11 +1,12 @@
 // @ts-nocheck —— 从桌面端逐行移植并增强的纯逻辑模块（支持双网 ID 归一化 + 第 1 页增量截断）。
 import { WebVpnAuthError, normalizeNoticeItem } from '../../notice-db.ts'
+import { getSubscribedCollegeSources, isCollegeSource, type CollegeSource } from '../../college-notices.ts'
 
 /**
- * 通知聚合适配器：三个来源
+ * 通知聚合适配器
  *  - 全校通知公告 / 校园新闻（i 科大 portal-api）
  *  - 教务处通知公告（jwc）
- *  - 材料学院通知公告（cl）
+ *  - 用户订阅的学院通知公告
  * 列表统一成 { source, sourceName, id, title, date, dept, url }；
  * 正文按需抓取（用户点开某条且本地无 IndexedDB 缓存时才请求），避免并发拉详情。
  */
@@ -13,7 +14,6 @@ import { WebVpnAuthError, normalizeNoticeItem } from '../../notice-db.ts'
 const PORTAL_URL = 'https://i-haust-edu-cn-s.haust.edu.cn/main.html#/NewsCenter'
 const JWC_LIST_DIRECT = 'https://jwc.haust.edu.cn/tzgg.htm'
 const JWC_LIST = 'https://jwc-haust-edu-cn-s.haust.edu.cn/tzgg.htm'
-const CL_LIST = 'https://cl.haust.edu.cn/index/tzgg.htm'
 
 const PORTAL_COLUMNS_JSON = JSON.stringify([
   { id: 'remote-1120073', tag: 'school', name: '全校通知' },
@@ -114,31 +114,48 @@ const JWC_LIST_JS = `(() => {
   return JSON.stringify(out);
 })()`
 
-const CL_LIST_JS = `(() => {
+function buildCollegeListJs(college: CollegeSource) {
+  return String.raw`(() => {
+  const { id: source, shortName: sourceName, fullName: dept, host } = ${JSON.stringify(college)};
+  if (location.hostname !== host) return '[]';
   const pad = (n) => String(n).padStart(2, '0');
+  const fullDate = /\b(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})\b|(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/;
+  const shortDate = /(?:^|[^\d./-])(\d{1,2})-(\d{1,2})(?![\d./-])/;
+  const readDate = (a) => {
+    const row = a.closest('li, tr');
+    let fallback = '';
+    for (let node = a.parentElement, depth = 0; node && depth < 4; node = node.parentElement, depth++) {
+      if (node.matches('body, main, html')) break;
+      const text = node.innerText || node.textContent || '';
+      const full = text.match(fullDate);
+      if (full) return (full[1] || full[4]) + '-' + pad(full[2] || full[5]) + '-' + pad(full[3] || full[6]);
+      const short = text.match(shortDate);
+      if (short && !fallback) fallback = new Date().getFullYear() + '-' + pad(short[1]) + '-' + pad(short[2]);
+      if (node === row) break;
+    }
+    return fallback;
+  };
   const out = [];
-  const seen = {};
-  document.querySelectorAll('a').forEach((a) => {
+  const seen = new Set();
+  document.querySelectorAll('a[href]').forEach((a) => {
     const href = a.getAttribute('href') || '';
-    const m1 = href.match(/info\\/1204\\/(\\d+)\\.htm/);
-    const m2 = href.match(/wbnewsid=(\\d+)/);
-    const id = (m1 && m1[1]) || (m2 && m2[1]);
-    if (!id || seen[id]) return;
-    seen[id] = 1;
-    const li = a.closest('li') || a.parentElement;
-    const m = ((li && li.innerText) || '').match(/(20\\d\\d)年(\\d{1,2})月(\\d{1,2})日/);
-    out.push({
-      source: 'cl', sourceName: '材料学院', id: id,
-      title: (a.title || a.textContent || '').replace(/\\s+/g, ' ').trim(),
-      date: m ? m[1] + '-' + pad(m[2]) + '-' + pad(m[3]) : '',
-      dept: '材料科学与工程学院',
-      url: 'https://cl.haust.edu.cn/info/1204/' + id + '.htm'
-    });
+    const title = (a.title?.trim() || a.textContent || '').replace(/\s+/g, ' ').trim();
+    if (title.length < 4) return;
+    try {
+      const url = new URL(href, location.href);
+      const id = url.pathname.match(/\/info\/\d+\/(\d+)\.htm$/)?.[1] || url.searchParams.get('wbnewsid');
+      if (!id || !/^\d+$/.test(id) || seen.has(id)) return;
+      if (url.protocol === 'http:' && url.hostname.endsWith('.haust.edu.cn')) url.protocol = 'https:';
+      if (url.protocol !== 'https:') return;
+      seen.add(id);
+      out.push({ source, sourceName, id, title, date: readDate(a), dept, url: url.href });
+    } catch (_) {}
   });
   return JSON.stringify(out);
 })()`
+}
 
-const BODY_JS = String.raw`((expectedTitle, expectedId) => {
+const BODY_JS = String.raw`((expectedTitle, expectedId, publicCollege) => {
   const norm = (s) => (s || '').replace(/\s+/g, ' ').trim();
   const el =
     document.querySelector('[id^=vsb_content]') ||
@@ -179,17 +196,20 @@ const BODY_JS = String.raw`((expectedTitle, expectedId) => {
   const dm = (document.body.innerText || '').match(/20\d\d年\d{1,2}月\d{1,2}日|20\d\d-\d{2}-\d{2}/);
   const url = location.href;
   const pageText = norm((document.body && document.body.innerText) || '');
-  const login = /统一身份认证|统一认证|VPN登录|VPN 登录|用户登录|请先登录|登录后查看/.test(pageText) ||
-    /\/login|\/cas\//i.test(url) || /passport|sso/i.test(location.hostname);
+  const loginUrl = /\/login|\/cas\//i.test(location.pathname) || /passport|sso/i.test(location.hostname);
+  const loginText = /统一身份认证|统一认证|VPN登录|VPN 登录|用户登录|请先登录|登录后查看/.test(pageText);
   const pageTitle = norm((el && el.querySelector('h1,h2,.tit,.title'))?.textContent || document.title);
   const compact = (s) => norm(s).replace(/[《》【】\[\]（）()“”"'：:，,。.!！?？\s]/g, '');
   const targetTitle = compact(expectedTitle);
   const actualTitle = compact(pageTitle);
   const idInUrl = expectedId && new RegExp('(?:wbnewsid=|/|id=)' + expectedId + '(?:\\D|$)').test(url);
-  const titleMatch = !!targetTitle && (actualTitle === targetTitle || actualTitle.includes(targetTitle) || targetTitle.includes(actualTitle));
+  const titleMatch = !!targetTitle && !!actualTitle &&
+    (actualTitle === targetTitle || actualTitle.includes(targetTitle) || targetTitle.includes(actualTitle));
   const content = el ? h2t(el) : '';
   const contentImages = imgs.length > 0;
-  const articleMatch = !login && !!(idInUrl || titleMatch) && !!(content || contentImages || attachments.length > 0);
+  const matchesArticle = !!(idInUrl || titleMatch) && !!(content || contentImages || attachments.length > 0);
+  const login = loginUrl || (loginText && !(publicCollege && matchesArticle));
+  const articleMatch = !login && matchesArticle;
   return JSON.stringify({
     title: pageTitle,
     text: content,
@@ -279,7 +299,7 @@ function isLoginLandingUrl(url) {
   return /\/cas\/login|vpn\.haust\.edu\.cn\/portal|loginExt|passport|auth\.htm/i.test(String(url || ''))
 }
 
-async function fetchList(engine, options = {}) {
+async function fetchList(engine, options: { existingKeys?: Set<string> | string[]; maxInitialPages?: number; collegeIds?: string[] } = {}) {
   const existingKeys = options.existingKeys instanceof Set
     ? options.existingKeys
     : new Set(Array.isArray(options.existingKeys) ? options.existingKeys : [])
@@ -374,31 +394,24 @@ async function fetchList(engine, options = {}) {
     } catch (_) {}
   }
 
-  // 3) 材料学院：直连失败回退 WebVPN；日常仅抓第 1 页，首次最多抓 3 页
-  const clPageLimit = hasSourceCache(['cl:']) ? 1 : maxInitialPages
-  for (const clTarget of buildCandidateUrls(CL_LIST, false)) {
+  // 3) 订阅学院：独立直连；日常仅抓第 1 页，首次最多抓 3 页
+  for (const college of getSubscribedCollegeSources(options.collegeIds || [])) {
     try {
-      const timeout = clTarget === CL_LIST ? 10000 : 25000
-      let nextUrl = clTarget
-      let clOk = false
-      for (let pageNo = 1; pageNo <= clPageLimit && nextUrl; pageNo++) {
-        const landedCl = await engine.load(nextUrl, timeout)
-        if (String(landedCl).startsWith('load-error')) break
-        if (isLoginLandingUrl(landedCl)) {
-          authRedirectCount += 1
-          break
-        }
-        const raw = await engine.run(CL_LIST_JS)
+      const pageLimit = hasSourceCache([`${college.id}:`]) ? 1 : maxInitialPages
+      const listJs = buildCollegeListJs(college)
+      let nextUrl = college.listUrl
+      for (let pageNo = 1; pageNo <= pageLimit && nextUrl; pageNo++) {
+        const landed = await engine.load(nextUrl, 10000)
+        if (safeDomain(landed) !== college.host || isLoginLandingUrl(landed)) break
+        const raw = await engine.run(listJs)
         const arr = typeof raw === 'string' ? JSON.parse(raw) : raw
         if (!Array.isArray(arr) || !arr.length) break
-        clOk = true
+        if (pageNo === 1) succeededSources += 1
         const hitCached = ingestPage(arr)
-        if (hitCached || pageNo >= clPageLimit) break
-        nextUrl = String((await engine.run(NEXT_PAGE_JS).catch(() => '')) || '')
-      }
-      if (clOk) {
-        succeededSources += 1
-        break
+        if (hitCached || pageNo >= pageLimit) break
+        const next = String((await engine.run(NEXT_PAGE_JS)) || '').replace(/^http:/i, 'https:')
+        if (!next.startsWith('https://') || next === nextUrl || safeDomain(next) !== college.host) break
+        nextUrl = next
       }
     } catch (_) {}
   }
@@ -431,10 +444,12 @@ async function fetchList(engine, options = {}) {
 
 async function fetchBody(engine, item) {
   const diagnostics = []
-  const expectedId = String(item.id || '').replace(/[^0-9]/g, '')
+  const publicCollege = isCollegeSource(item.source)
+  const rawId = String(item.id || '')
+  const expectedId = (publicCollege ? rawId.replace(/^\d+_/, '') : rawId).replace(/[^0-9]/g, '')
   const expectedTitle = String(item.title || '')
   const capture = async () => {
-    const js = `${BODY_JS}(${JSON.stringify(expectedTitle)}, ${JSON.stringify(expectedId)})`
+    const js = `${BODY_JS}(${JSON.stringify(expectedTitle)}, ${JSON.stringify(expectedId)}, ${publicCollege})`
     const raw = await engine.run(js)
     return typeof raw === 'string' ? JSON.parse(raw) : raw
   }
@@ -478,8 +493,11 @@ async function fetchBody(engine, item) {
     }
   }
 
-  // 主链路：优先 WebVPN 代理链接（避免非校园网白等直连超时），教务处自动附带列表页 Referer 绕过防盗链
-  const candidates = buildCandidateUrls(item.url, true)
+  // 学院优先 HTTPS 直连；其他来源先走 WebVPN，教务处正文附带对应列表页 Referer。
+  const directUrl = publicCollege ? toDirectUrl(item.url) : ''
+  const publicUrl = safeDomain(directUrl).endsWith('.haust.edu.cn') ? directUrl.replace(/^http:/i, 'https:') : directUrl
+  const candidates = buildCandidateUrls(publicUrl || item.url, !publicCollege)
+  const sourceUrl = publicUrl || toWebVpnUrl(item.url) || item.url
   let lastResult = { failure: 'network', error: '网络连接失败，请重新加载。' }
   for (const target of candidates) {
     const viaVpn = isWebVpnHost(safeDomain(target))
@@ -488,9 +506,9 @@ async function fetchBody(engine, item) {
       : (viaVpn ? 'webvpn' : 'original')
     const referer = item.source === 'jwc' ? (viaVpn ? JWC_LIST : JWC_LIST_DIRECT) : ''
     const res = await attempt(target, kind, viaVpn ? 25000 : 10000, referer)
-    if (!res.failure) return { ...res, sourceUrl: viaVpn ? target : (toWebVpnUrl(item.url) || item.url) }
+    if (!res.failure) return { ...res, sourceUrl: viaVpn ? target : sourceUrl }
     lastResult = res
-    if (res.failure === 'auth') return { ...res, sourceUrl: toWebVpnUrl(item.url) || item.url }
+    if (res.failure === 'auth') return { ...res, sourceUrl }
   }
 
   if (lastResult.failure !== 'auth' && item.source === 'jwc' && item.mirrorUrl) {
@@ -541,9 +559,9 @@ async function fetchBody(engine, item) {
     title: '', text: '', imgs: [], failure,
     error: failure === 'network' ? '网络连接失败，请重新加载。' : '未能识别正文。可在应用内打开原文查看。',
     diagnostics,
-    sourceUrl: toWebVpnUrl(item.url) || item.url,
+    sourceUrl,
     pageType: last?.pageType || 'unknown'
   }
 }
 
-export { fetchList, fetchBody, toWebVpnUrl, toDirectUrl, buildCandidateUrls, PORTAL_URL, JWC_LIST, JWC_LIST_DIRECT, CL_LIST }
+export { fetchList, fetchBody, toWebVpnUrl, toDirectUrl, buildCandidateUrls, PORTAL_URL, JWC_LIST, JWC_LIST_DIRECT }

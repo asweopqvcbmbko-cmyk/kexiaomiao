@@ -8,6 +8,14 @@ import {
   toDirectUrl,
   buildCandidateUrls
 } from '../src/android/lib/notices.ts'
+import {
+  COLLEGES,
+  MAX_SUBSCRIBED_COLLEGES,
+  SUBSCRIBED_COLLEGES_KEY,
+  readSubscribedColleges,
+  sanitizeCollegeIds,
+  writeSubscribedColleges
+} from '../src/college-notices.ts'
 import { createCloudPaymentSession } from '../../desktop/src/lib/aircon-session.mjs'
 import {
   WebVpnAuthError,
@@ -42,6 +50,32 @@ import { compareSemver, pickBestRelease, shouldAutoCheckToday } from '../src/upd
 import { hasExistingUserConfig, readChaoxingSnapshot } from '../src/snapshot.ts'
 
 async function runTests() {
+  assert.equal(COLLEGES.length, 30)
+  assert.equal(new Set(COLLEGES.map(({ id }) => id)).size, 30)
+  for (const college of COLLEGES) {
+    const url = new URL(college.listUrl)
+    assert.equal(url.protocol, 'https:')
+    assert.match(url.hostname, /^[a-z0-9-]+\.haust\.edu\.cn$/)
+    assert.equal(url.hostname, college.host)
+  }
+  assert.equal(MAX_SUBSCRIBED_COLLEGES, 5)
+  const collegeIds = [' jd ', 'jd', 'unknown', 'cl', 'ng', 'dx', 'wl', 'ty']
+  const cleanCollegeIds = ['jd', 'cl', 'ng', 'dx', 'wl']
+  assert.deepEqual(sanitizeCollegeIds(collegeIds), cleanCollegeIds)
+  assert.deepEqual(sanitizeCollegeIds('jd'), [])
+  const subscriptionStorage = new Map()
+  const collegeStorage = {
+    getItem: (key) => subscriptionStorage.get(key) ?? null,
+    setItem: (key, value) => subscriptionStorage.set(key, value)
+  }
+  assert.deepEqual(readSubscribedColleges(collegeStorage), [])
+  assert.deepEqual(writeSubscribedColleges(collegeIds, collegeStorage), cleanCollegeIds)
+  assert.deepEqual(readSubscribedColleges(collegeStorage), cleanCollegeIds)
+  assert.deepEqual(writeSubscribedColleges([], collegeStorage), [])
+  assert.deepEqual(readSubscribedColleges(collegeStorage), [])
+  collegeStorage.setItem(SUBSCRIBED_COLLEGES_KEY, 'invalid JSON')
+  assert.deepEqual(readSubscribedColleges(collegeStorage), [])
+
   // 1. card.ts: 落地到登录页应立刻抛出 NO_SESSION
   await assert.rejects(
     () =>
@@ -99,7 +133,7 @@ async function runTests() {
   })
   assert.equal(cardRes.balance, '128.50')
 
-  // 5. notices.ts: 三个通知源全部失败（load-error）时必须抛错，不能返回空数组
+  // 5. notices.ts: 全部通知源失败时必须抛错，不能返回空数组
   await assert.rejects(
     () =>
       fetchList({
@@ -158,6 +192,106 @@ async function runTests() {
   assert.equal(listRes.items.length, 2)
   const jwcItem = listRes.items.find((x) => x.source === 'jwc')
   assert.equal(jwcItem.mirrorUrl, 'https://www.haust.edu.cn/info/201.htm')
+
+  // Android 隐藏 WebView 注入的学院列表脚本：静态/动态链接、日期、翻页和故障隔离。
+  const jd = COLLEGES.find(({ id }) => id === 'jd')
+  const ng = COLLEGES.find(({ id }) => id === 'ng')
+  const cl = COLLEGES.find(({ id }) => id === 'cl')
+  const jdNext = 'https://jd.haust.edu.cn/xwtz/tzgg/2.htm'
+  const collegeLink = (href, title, date, tag = 'li') => {
+    const row = { innerText: `${title} ${date}`, matches: () => false }
+    return {
+      getAttribute: () => href,
+      title: '',
+      textContent: title,
+      parentElement: row,
+      closest: () => tag === 'div' ? null : row
+    }
+  }
+  const collegePages = new Map([
+    [jd.listUrl, [
+      collegeLink('../info/1001/1.htm', '首页', ''),
+      collegeLink('../info/1001/1.htm', '机电学院公告一', '2026-1-2'),
+      collegeLink('list.jsp?wbnewsid=1', '重复的动态链接', '2026-1-2')
+    ]],
+    [jdNext, [
+      collegeLink('http://jd.haust.edu.cn/info/1001/2.htm', '机电学院公告二', '2026/2/3', 'tr'),
+      collegeLink('/info/1001/3.htm', '机电学院公告三', '2026.3.4', 'div')
+    ]],
+    [ng.listUrl, [
+      collegeLink('article.jsp?urltype=news.NewsContentUrl&wbnewsid=4', '农业装备学院公告四', '2026年4月5日'),
+      collegeLink('/info/1037/5.htm', '农业装备学院公告五', '5-6')
+    ]]
+  ])
+  const collegeLoads = []
+  let collegePageUrl
+  const collegeEngine = {
+    load: async (url) => {
+      collegeLoads.push(url)
+      if (url === cl.listUrl) throw new Error('timeout')
+      collegePageUrl = url
+      return url
+    },
+    run: async (js) => {
+      if (js.includes('__haustPortalNotices')) return 'started'
+      if (js.includes("source: 'jwc'")) return JSON.stringify([jwcItem])
+      const links = js.includes('const next =') ? (
+        collegePageUrl === jd.listUrl ? [collegeLink('tzgg/2.htm', '下一页', '')] : []
+      ) : collegePages.get(collegePageUrl)
+      return vm.runInNewContext(js, {
+        URL,
+        location: new URL(collegePageUrl),
+        document: { querySelectorAll: () => links }
+      })
+    },
+    waitFor: async () => ({ okCount: 2, items: [
+      { source: 'school', id: '201', title: '全校通知测试' },
+      { source: 'news', id: '202', title: '校园新闻测试' }
+    ] })
+  }
+  const coreKeys = ['school:201', 'news:202', 'jwc:101']
+  const coreList = await fetchList(collegeEngine, { existingKeys: coreKeys })
+  const coreLoads = collegeLoads.splice(0)
+  assert.equal(coreLoads.length, 2)
+  assert.deepEqual(coreList.items.map(({ source }) => source).sort(), ['jwc', 'news', 'school'])
+  const subscribedList = await fetchList(collegeEngine, {
+    existingKeys: coreKeys,
+    collegeIds: ['jd', 'cl', 'ng', 'jd', 'unknown']
+  })
+  assert.deepEqual(collegeLoads.splice(0), [...coreLoads, jd.listUrl, jdNext, cl.listUrl, ng.listUrl])
+  const jdItems = subscribedList.items.filter(({ source }) => source === 'jd').reverse()
+  assert.deepEqual(jdItems.map(({ date, url }) => [date, url]), [
+    ['2026-01-02', 'https://jd.haust.edu.cn/info/1001/1.htm'],
+    ['2026-02-03', 'https://jd.haust.edu.cn/info/1001/2.htm'],
+    ['2026-03-04', 'https://jd.haust.edu.cn/info/1001/3.htm']
+  ])
+  assert.equal(jdItems[0].sourceName, jd.shortName)
+  assert.equal(jdItems[0].dept, jd.fullName)
+  const ngItems = subscribedList.items.filter(({ source }) => source === 'ng')
+  assert.equal(ngItems.find(({ id }) => id === '4').date, '2026-04-05')
+  assert.equal(ngItems.find(({ id }) => id === '1037_5').date, `${new Date().getFullYear()}-05-06`)
+  await fetchList(collegeEngine, { existingKeys: [...coreKeys, 'jd:1001_1'], collegeIds: ['jd'] })
+  assert.deepEqual(collegeLoads.splice(0), [...coreLoads, jd.listUrl])
+
+  const publicBodyUrl = jdItems[0].url
+  const collegeBody = await fetchBody({
+    load: async (url) => {
+      collegeLoads.push(url)
+      return url
+    },
+    run: async (js) => vm.runInNewContext(js, {
+      location: new URL(publicBodyUrl),
+      document: {
+        body: { innerText: '统一身份认证 学院公告正文' },
+        title: '机电工程学院',
+        querySelector: () => ({ innerHTML: '学院公告正文', querySelectorAll: () => [], querySelector: () => null }),
+        createElement: () => ({ set innerHTML(value) { this.value = value } })
+      }
+    })
+  }, { ...jdItems[0], url: publicBodyUrl.replace('https:', 'http:') })
+  assert.deepEqual(collegeLoads, [publicBodyUrl])
+  assert.equal(collegeBody.sourceUrl, publicBodyUrl)
+  assert.equal(collegeBody.text, '学院公告正文')
 
   // 7. notices.ts: 校内域名 <-> WebVPN 代理域名双向转换
   assert.equal(
