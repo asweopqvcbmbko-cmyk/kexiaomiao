@@ -120,9 +120,11 @@ export function Dashboard(props: {
   const ignored = settings.ignoredCourses
   const courses = [...(results?.activities?.courses || []), ...(results?.progress?.courses || [])]
   const namedItems = [...(dash?.works || []), ...(dash?.exams || [])]
-  const namesById = new Map(courses.map((c) => [c.courseId, c.courseName]))
+  const namesById = new Map<string, string>()
   for (const item of namedItems) if (item.courseId && item.course) namesById.set(item.courseId, item.course)
-  const courseName = (item: { course: string; courseId: string }) => item.course || namesById.get(item.courseId) || ''
+  for (const c of courses) if (c.courseId && c.courseName) namesById.set(c.courseId, c.courseName)
+  const courseName = (item: { course: string; courseId: string }) =>
+    (item.courseId && namesById.get(item.courseId)) || item.course || ''
   const works = filterByIgnoredCourses(dash?.works || [], ignored, courseName)
   const exams = filterByIgnoredCourses(dash?.exams || [], ignored, courseName)
   const activities = filterByIgnoredCourses(results?.activities?.activities || [], ignored, (item) => item.courseName)

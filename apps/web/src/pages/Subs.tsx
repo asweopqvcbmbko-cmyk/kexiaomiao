@@ -39,6 +39,8 @@ export function NoticesPage(props: {
   stale: boolean
   authRequired?: boolean
   refreshing: boolean
+  subscribedColleges?: string[]
+  onChangeSubscribedColleges?: (ids: string[]) => void
   onRefresh: () => void
   onBack: () => void
   onOpen: (n: NoticeItem) => void

@@ -154,7 +154,7 @@ export type CacheInfo = {
 }
 
 export type NoticeItem = {
-  source: 'school' | 'news' | 'jwc' | 'cl'
+  source: 'school' | 'news' | 'jwc' | 'cl' | (string & {})
   sourceName: string
   id: string
   title: string

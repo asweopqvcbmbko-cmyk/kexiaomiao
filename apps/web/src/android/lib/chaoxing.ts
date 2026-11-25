@@ -291,8 +291,18 @@ export async function fetchChaoxingDashboard(engine: Engine): Promise<ChaoxingDa
   let workErr: unknown = null
   let examErr: unknown = null
 
+  let fullCourseNames = new Map<string, string>()
   try {
     works = await fetchPage<ChaoxingWork>(engine, CHAOXING_WORK_URL, 'work')
+    if (works !== null) {
+      // 复用已打开的 mooc1-api 同源页顺手拿完整课程名，替换作业页服务端截断的《...》名称
+      try {
+        const rawCourses = await fetchCourseJson(engine, ORIGIN + '/mycourse/backclazzdata?view=json&mcode=')
+        for (const c of parseCourseListJson(rawCourses)) {
+          if (c.courseId && c.courseName) fullCourseNames.set(c.courseId, c.courseName)
+        }
+      } catch (_) {}
+    }
   } catch (err) {
     workErr = err
   }
@@ -315,16 +325,26 @@ export async function fetchChaoxingDashboard(engine: Engine): Promise<ChaoxingDa
     throw workErr || examErr || new ChaoxingParseError('Failed to fetch Chaoxing dashboard')
   }
 
-  const finalWorks = works || []
+  const finalWorks = (works || []).map((item) => ({
+    ...item,
+    course: fullCourseNames.get(item.courseId) || item.course
+  }))
   const finalExams = exams || []
-  const courseNames = new Map(
-    finalWorks.filter((item) => item.courseId && item.course).map((item) => [item.courseId, item.course])
-  )
+  const courseNames = new Map<string, string>()
+  for (const item of finalWorks) {
+    if (item.courseId && item.course) courseNames.set(item.courseId, item.course)
+  }
+  for (const [id, name] of fullCourseNames) {
+    courseNames.set(id, name)
+  }
   return {
     loggedIn: true,
     error: exams === null && examErr ? examErr instanceof ChaoxingParseError ? 'parse' : 'network' : undefined,
     works: finalWorks,
-    exams: finalExams.map((item) => ({ ...item, course: item.course || courseNames.get(item.courseId) || '' })),
+    exams: finalExams.map((item) => ({
+      ...item,
+      course: fullCourseNames.get(item.courseId) || item.course || courseNames.get(item.courseId) || ''
+    })),
     fetchedAt: new Date().toISOString()
   }
 }
