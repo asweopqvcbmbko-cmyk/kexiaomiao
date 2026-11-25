@@ -1,5 +1,5 @@
 {
-    "updatedAt":  "2026-11-25T08:54:10Z",
+    "updatedAt":  "2026-11-25T09:06:44Z",
     "schemaVersion":  1,
     "beta":  {
                  "mirrors":  [
@@ -17,17 +17,17 @@
              },
     "stable":  {
                    "mirrors":  [
-                                   "https://edgeone.gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2/kexiaomiao-v0.2.2.apk",
-                                   "https://gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2/kexiaomiao-v0.2.2.apk"
+                                   "https://edgeone.gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.3/kexiaomiao-v0.2.3.apk",
+                                   "https://gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.3/kexiaomiao-v0.2.3.apk"
                                ],
-                   "apkUrl":  "https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2/kexiaomiao-v0.2.2.apk",
-                   "size":  3398195,
-                   "notes":  "1. 全面升级无感续登：Android Keystore 本机加密保存教务与学习通凭据，云端更新及多端挤下线后自动后台静默重登\n2. 校园通知重磅升级：覆盖河科大全部 30 个学院/书院（支持多选订阅），升级原生 HTTP 全源并发直连（提速 10–20×），全新极简分组排版\n3. 课程表全面重构：新增 1–20 周快速选周、丝滑日/周切换并记忆偏好、日视图实时上课高亮、周视图一屏自适应智能周末折叠（5/7 列）与当前时间线\n4. 学习通仪表盘优化：修复完整课程名与冷启动快照，低进度优先展示 + 100% 折叠 + 弹性左滑两步忽略旧学期课程\n5. 全新界面美学：澎湃 4「光感玻璃」悬浮底栏、「我的」极光流光 Hero 卡片矩阵、6 步开机 OOBE 互动新手引导（本次升级后可体验一次，不清空数据）\n6. 体验修复：禁用 Android 系统果冻过滚变形，修复跨版本更新日志聚合与默认跟随系统外观",
-                   "publishedAt":  "2026-11-25T05:13:05Z",
-                   "sha256":  "540f5f760258136783bac32e35c21064ed5b2e037ab32ee1c7bc1262a0097d6e",
+                   "apkUrl":  "https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.3/kexiaomiao-v0.2.3.apk",
+                   "size":  3404975,
+                   "notes":  "1. 校园通知全面提速与稳定升级：重构 VSB 学院/全校/教务通知正文解析（公网学院实测 60–75ms 秒开），过滤校徽与轮播装饰图、剔除农学院/车辆学院导航菜单混入，新增 WebVPN 图片原生代理彻底修复裂图，并支持点击正文图片全屏捏合/双击放大查看；通知缓存升级至 v4 自动清脏（完整保留已读记录）\n2. 零感静默续登与云端更新体验升级：修复静默登录与原生密码登录未落盘 Cookie 的问题；云端更新重启后自动重置冷却并后台静默续登教务、WebVPN 门户与学习通，续登期间无缝保留本地课表与已登录态零闪烁\n3. 学习通仪表盘重磅提速与修复：课程进度与课堂活动升级为原生 2 路小并发 HTTP（200ms 批次间隔 + 403/429 熔断保护 + 10 分钟 SWR 缓存），大幅缩短等待时间；修复网页版弹起软键盘黑屏问题；分段 Tab 仅统计未完成数量，与顶部统计卡保持一致\n4. 原生手感打磨：全局锁定界面 1:1 比例禁用意外双指放大，同时保留正文图片灯箱缩放与内置网页自由缩放",
+                   "publishedAt":  "2026-11-25T09:06:44Z",
+                   "sha256":  "92c48c0bb6a805ea1aa28ff9f4a7e0597e8a252068e285f8550aa00c48426de0",
                    "channel":  "stable",
-                   "versionName":  "0.2.2",
-                   "versionCode":  24
+                   "versionName":  "0.2.3",
+                   "versionCode":  30
                },
     "changelog":  [
                       {
@@ -71,6 +71,12 @@
                           "versionCode":  29,
                           "versionName":  "0.2.3-beta.5",
                           "notes":  "- 修复云端更新重启后后台静默续登期间界面短暂闪烁「未登录」并隐藏课表/考试快照的问题：探活阶段延后广播登出事件，始终无缝展示本地缓存数据，仅在静默重登确实失败时才切换未登录\n- 包含 v0.2.3-beta.1 ~ beta.4 全部修复（通知正文解析/图片代理/导航栏过滤/v4 缓存自愈、学习通键盘黑屏与 2 路并发提速、静默登录落盘与 WebVPN 自动续签）"
+                      },
+                      {
+                          "channel":  "stable",
+                          "versionCode":  30,
+                          "versionName":  "0.2.3",
+                          "notes":  "1. 校园通知全面提速与稳定升级：重构 VSB 学院/全校/教务通知正文解析（公网学院实测 60–75ms 秒开），过滤校徽与轮播装饰图、剔除农学院/车辆学院导航菜单混入，新增 WebVPN 图片原生代理彻底修复裂图，并支持点击正文图片全屏捏合/双击放大查看；通知缓存升级至 v4 自动清脏（完整保留已读记录）\n2. 零感静默续登与云端更新体验升级：修复静默登录与原生密码登录未落盘 Cookie 的问题；云端更新重启后自动重置冷却并后台静默续登教务、WebVPN 门户与学习通，续登期间无缝保留本地课表与已登录态零闪烁\n3. 学习通仪表盘重磅提速与修复：课程进度与课堂活动升级为原生 2 路小并发 HTTP（200ms 批次间隔 + 403/429 熔断保护 + 10 分钟 SWR 缓存），大幅缩短等待时间；修复网页版弹起软键盘黑屏问题；分段 Tab 仅统计未完成数量，与顶部统计卡保持一致\n4. 原生手感打磨：全局锁定界面 1:1 比例禁用意外双指放大，同时保留正文图片灯箱缩放与内置网页自由缩放"
                       }
                   ]
 }

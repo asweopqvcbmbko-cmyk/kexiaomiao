@@ -117,7 +117,20 @@ function NoticeImage({ src, alt, referer }: { src: string; alt: string; referer?
   const isVpn = /-haust-edu-cn-s\.haust\.edu\.cn/i.test(src)
   const [resolved, setResolved] = useState<string | null>(() => (isVpn ? null : src))
   const [failed, setFailed] = useState(false)
+  const [lightbox, setLightbox] = useState(false)
+  const [scale, setScale] = useState(1)
+  const [offset, setOffset] = useState({ x: 0, y: 0 })
   const retriedRef = useRef(false)
+  const gestureRef = useRef<{
+    mode: 'none' | 'pan' | 'pinch'
+    startX: number
+    startY: number
+    baseX: number
+    baseY: number
+    startDist: number
+    baseScale: number
+    lastTap: number
+  }>({ mode: 'none', startX: 0, startY: 0, baseX: 0, baseY: 0, startDist: 0, baseScale: 1, lastTap: 0 })
 
   useEffect(() => {
     let alive = true
@@ -133,13 +146,24 @@ function NoticeImage({ src, alt, referer }: { src: string; alt: string; referer?
       if (dataUrl) {
         setResolved(dataUrl)
       } else {
-        // Fallback to raw src once before declaring failure (e.g. desktop Electron).
         retriedRef.current = true
         setResolved(src)
       }
     })
     return () => { alive = false }
   }, [src, referer, isVpn])
+
+  const openLightbox = () => {
+    setScale(1)
+    setOffset({ x: 0, y: 0 })
+    setLightbox(true)
+  }
+
+  const closeLightbox = () => {
+    setLightbox(false)
+    setScale(1)
+    setOffset({ x: 0, y: 0 })
+  }
 
   const handleError = () => {
     if (!retriedRef.current) {
@@ -193,13 +217,145 @@ function NoticeImage({ src, alt, referer }: { src: string; alt: string; referer?
   }
 
   return (
-    <img
-      src={resolved}
-      alt={alt}
-      referrerPolicy="no-referrer"
-      onError={handleError}
-      style={{ display: 'block', maxWidth: '100%', height: 'auto', margin: '12px auto', borderRadius: 8 }}
-    />
+    <>
+      <img
+        src={resolved}
+        alt={alt}
+        referrerPolicy="no-referrer"
+        onError={handleError}
+        onClick={openLightbox}
+        style={{ display: 'block', maxWidth: '100%', height: 'auto', margin: '12px auto', borderRadius: 8, cursor: 'zoom-in' }}
+      />
+      {lightbox && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="图片全屏预览"
+          onClick={(e) => { if (e.target === e.currentTarget) closeLightbox() }}
+          onTouchStart={(e) => {
+            const g = gestureRef.current
+            if (e.touches.length === 2) {
+              const dx = e.touches[0].clientX - e.touches[1].clientX
+              const dy = e.touches[0].clientY - e.touches[1].clientY
+              g.mode = 'pinch'
+              g.startDist = Math.hypot(dx, dy) || 1
+              g.baseScale = scale
+            } else if (e.touches.length === 1) {
+              const now = Date.now()
+              if (now - g.lastTap < 280) {
+                g.lastTap = 0
+                if (scale > 1.1) {
+                  setScale(1)
+                  setOffset({ x: 0, y: 0 })
+                } else {
+                  setScale(2.2)
+                }
+                g.mode = 'none'
+                return
+              }
+              g.lastTap = now
+              if (scale > 1) {
+                g.mode = 'pan'
+                g.startX = e.touches[0].clientX
+                g.startY = e.touches[0].clientY
+                g.baseX = offset.x
+                g.baseY = offset.y
+              } else {
+                g.mode = 'none'
+              }
+            }
+          }}
+          onTouchMove={(e) => {
+            const g = gestureRef.current
+            if (g.mode === 'pinch' && e.touches.length === 2) {
+              e.preventDefault()
+              const dx = e.touches[0].clientX - e.touches[1].clientX
+              const dy = e.touches[0].clientY - e.touches[1].clientY
+              const next = Math.max(1, Math.min(4, g.baseScale * (Math.hypot(dx, dy) / g.startDist)))
+              setScale(next)
+              if (next <= 1.02) setOffset({ x: 0, y: 0 })
+            } else if (g.mode === 'pan' && e.touches.length === 1 && scale > 1) {
+              e.preventDefault()
+              setOffset({
+                x: g.baseX + (e.touches[0].clientX - g.startX),
+                y: g.baseY + (e.touches[0].clientY - g.startY)
+              })
+            }
+          }}
+          onTouchEnd={() => {
+            gestureRef.current.mode = 'none'
+          }}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 9999,
+            background: 'rgba(6, 10, 18, 0.92)',
+            backdropFilter: 'blur(12px)',
+            WebkitBackdropFilter: 'blur(12px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            overflow: 'hidden',
+            touchAction: 'none'
+          }}
+        >
+          <button
+            type="button"
+            aria-label="关闭预览"
+            onClick={closeLightbox}
+            style={{
+              position: 'fixed',
+              top: 'calc(env(safe-area-inset-top, 16px) + 14px)',
+              right: 16,
+              zIndex: 10000,
+              width: 36,
+              height: 36,
+              borderRadius: 18,
+              border: '1px solid rgba(255,255,255,0.22)',
+              background: 'rgba(255,255,255,0.14)',
+              color: '#fff',
+              fontSize: 18,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+          >
+            ×
+          </button>
+          <img
+            src={resolved}
+            alt={alt}
+            referrerPolicy="no-referrer"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              maxWidth: '96vw',
+              maxHeight: '86vh',
+              objectFit: 'contain',
+              borderRadius: 6,
+              transform: `translate3d(${offset.x}px, ${offset.y}px, 0) scale(${scale})`,
+              transition: gestureRef.current.mode === 'none' ? 'transform 160ms ease-out' : 'none',
+              userSelect: 'none'
+            }}
+          />
+          <div
+            style={{
+              position: 'fixed',
+              bottom: 'calc(env(safe-area-inset-bottom, 12px) + 16px)',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              padding: '5px 12px',
+              borderRadius: 999,
+              background: 'rgba(255,255,255,0.12)',
+              color: 'rgba(255,255,255,0.85)',
+              fontSize: 12,
+              pointerEvents: 'none'
+            }}
+          >
+            双指捏合或双击放大 · 点击空白处关闭
+          </div>
+        </div>
+      )}
+    </>
   )
 }
 

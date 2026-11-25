@@ -3,6 +3,7 @@ package cn.edu.haust.campusassistant;
 import android.os.Bundle;
 import android.view.View;
 import android.webkit.CookieManager;
+import android.webkit.WebSettings;
 import android.webkit.WebView;
 
 import androidx.activity.OnBackPressedCallback;
@@ -18,9 +19,14 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(AppUpdaterPlugin.class);
         super.onCreate(savedInstanceState);
 
-        // 禁用 Android 12+ 系统级 WebView 边缘果冻拉伸（EdgeEffect Stretch），避免与自定义下拉刷新叠加导致页面与底栏变形
+        // 禁用 Android 12+ 系统级 WebView 边缘果冻拉伸与全局双指缩放，保持原生 App 1:1 手感
         if (bridge != null && bridge.getWebView() != null) {
-            bridge.getWebView().setOverScrollMode(View.OVER_SCROLL_NEVER);
+            WebView webView = bridge.getWebView();
+            webView.setOverScrollMode(View.OVER_SCROLL_NEVER);
+            WebSettings settings = webView.getSettings();
+            settings.setSupportZoom(false);
+            settings.setBuiltInZoomControls(false);
+            settings.setDisplayZoomControls(false);
         }
 
         // 迁移至 OnBackPressedDispatcher，兼容 Android 16 (targetSdk 36) 预测性返回手势
