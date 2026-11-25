@@ -1,9 +1,32 @@
-# 科小喵（KeXiaoMiao）· 河南科技大学校园助手
+# 科小喵（KeXiaoMiao）· 科大校园助手
 
 [![CI](https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/actions/workflows/ci.yml/badge.svg)](https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 
-一款面向河南科技大学（HAUST）学生的轻量级校园日常助手，采用 **React + TypeScript + Capacitor Android**（兼顾 Electron 桌面端复用）架构，纯本地直连校园服务，**无任何第三方中转服务器**，所有账号凭据仅保存在本机安全存储中。
+一款面向科大学生的轻量级校园日常助手，采用 **React + TypeScript + Capacitor Android**（兼顾 Electron 桌面端复用）架构，纯本地直连校园服务，**无任何第三方中转服务器**，所有账号凭据仅保存在本机安全存储中。
+
+## 应用预览
+
+画面使用 v0.2.3 的演示数据。点击海报可查看原图。
+
+<table>
+  <tr>
+    <td><a href="./docs/gallery/01-home.png"><img src="./docs/gallery/01-home.png" alt="科小喵首页" width="420"></a></td>
+    <td><a href="./docs/gallery/02-schedule.png"><img src="./docs/gallery/02-schedule.png" alt="日课表与周课表" width="420"></a></td>
+  </tr>
+  <tr>
+    <td><a href="./docs/gallery/03-exams.png"><img src="./docs/gallery/03-exams.png" alt="教务考试安排" width="420"></a></td>
+    <td><a href="./docs/gallery/04-chaoxing.png"><img src="./docs/gallery/04-chaoxing.png" alt="学习通仪表盘" width="420"></a></td>
+  </tr>
+  <tr>
+    <td><a href="./docs/gallery/05-notices.png"><img src="./docs/gallery/05-notices.png" alt="学院订阅与校园通知" width="420"></a></td>
+    <td><a href="./docs/gallery/06-campus-services.png"><img src="./docs/gallery/06-campus-services.png" alt="校园生活查询" width="420"></a></td>
+  </tr>
+  <tr>
+    <td><a href="./docs/gallery/07-appearance.png"><img src="./docs/gallery/07-appearance.png" alt="浅色与深色外观" width="420"></a></td>
+    <td><a href="./docs/gallery/08-privacy.png"><img src="./docs/gallery/08-privacy.png" alt="隐私与安全" width="420"></a></td>
+  </tr>
+</table>
 
 ## 核心功能
 
@@ -82,9 +105,9 @@ cd android && ./gradlew assembleDebug
 
 ## 隐私与免责声明
 
-- 本项目为开源第三方校园工具，与河南科技大学官方及超星学习通无官方隶属关系。
+- 本项目为开源第三方校园工具，与科大官方及超星学习通无官方隶属关系。
 - 所有网络请求均由用户设备直接发往学校教务、校园门户、WebVPN 或超星官方域名，**不经过任何第三方后台服务器**，不收集、不上传任何个人账号或隐私数据。
-- 教务「记住密码」仅加密保存在本机 Android Keystore 中，学习通仅记录上次账号且绝不落盘密码。
+- 选择「记住密码」后，教务与学习通密码登录的凭据会在 Android 本机加密保存，可在「我的」中清除。
 
 ## License
 
