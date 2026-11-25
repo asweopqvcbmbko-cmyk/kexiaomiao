@@ -20,10 +20,11 @@ import {
   driveAuth, failAuth, inspectAuthPage, waitForAuthInput, type AuthBrowser
 } from './lib/auth-flow'
 import { CHAOXING_LAST_ACCOUNT_KEY, driveChaoxingAuth, isChaoxingDestination, rememberChaoxingAccount } from './lib/chaoxing-auth'
-import { readChaoxingSnapshot } from '../snapshot'
+import { HOME_SNAPSHOT_KEY, readChaoxingSnapshot, type HomeSnapshot } from '../snapshot'
 import { readSubscribedColleges } from '../college-notices'
 import { createCloudPaymentSession } from '../../../desktop/src/lib/aircon-session.mjs'
 import {
+  NOTICE_DB_VERSION,
   WebVpnAuthError,
   getAllNoticeKeys,
   getAllNotices,
@@ -133,6 +134,21 @@ async function fetchNoticeImageDataUrl(rawUrl: string, referer?: string): Promis
 
 const HOME = 'https://jwgl-haust-edu-cn-s.haust.edu.cn/eams/homeExt.action'
 const EAMS_RE = /jwgl-haust-edu-cn-s\.haust\.edu\.cn\/eams\//
+const PORTAL = new URL(notices.PORTAL_URL)
+const PORTAL_TIMEOUT_MS = 12_000
+const PORTAL_READY_JS = `(() => (
+  location.origin === ${JSON.stringify(PORTAL.origin)} &&
+  location.pathname === ${JSON.stringify(PORTAL.pathname)} &&
+  document.readyState !== 'loading' &&
+  !document.querySelector('input[type="password"]')
+  ? 'ready' : ''
+))()`
+const OPEN_PORTAL_JS = `location.replace(${JSON.stringify(notices.PORTAL_URL)})`
+
+async function hasNoticePortalCookie(): Promise<boolean> {
+  const cookies = await readNoticeCookies(notices.PORTAL_URL)
+  return /(?:^|;\s*)wengine_vpn_ticket=[^;\s]+/i.test(cookies)
+}
 
 const isEams = (url: string) => EAMS_RE.test(url || '') && !/loginExt/.test(url || '')
 
@@ -144,6 +160,12 @@ const log = (...a: any[]) => {
   } catch (_) {}
 }
 
+function authFailureReason(error: unknown): string {
+  if (error instanceof AuthFlowError) return error.failure.reason
+  if (error instanceof DOMException && error.name === 'AbortError') return 'cancelled'
+  return 'network'
+}
+
 /** 页面内容判定：真的进了教务首页才算登录成功，避免被 CAS 中间页骗过 */
 const LOGGED_IN_JS = `(() => {
   const t = document.body.innerText || '';
@@ -152,8 +174,7 @@ const LOGGED_IN_JS = `(() => {
   return JSON.stringify({
     ok: hasNav && !isLogin,
     url: location.href,
-    len: t.length,
-    head: t.replace(/\\s+/g, ' ').slice(0, 60)
+    len: t.length
   });
 })()`
 
@@ -187,6 +208,26 @@ function withEngine<T>(fn: () => Promise<T>): Promise<T> {
 
 /* ---------------- 本地缓存 ---------------- */
 const K = (k: string) => `haust.cache.${k}`
+
+// The startup snapshot and localStorage fallback must follow the IndexedDB migration.
+try {
+  const key = 'haust.runtime.noticeCacheVersion'
+  const version = String(NOTICE_DB_VERSION)
+  if (localStorage.getItem(key) !== version) {
+    localStorage.removeItem(K('notices'))
+    const raw = localStorage.getItem(HOME_SNAPSHOT_KEY)
+    if (raw) {
+      const snapshot = JSON.parse(raw) as HomeSnapshot | null
+      if (snapshot && typeof snapshot === 'object') {
+        snapshot.notices = []
+        snapshot.syncTimes = { ...snapshot.syncTimes, notices: 0 }
+        localStorage.setItem(HOME_SNAPSHOT_KEY, JSON.stringify(snapshot))
+      }
+    }
+    localStorage.setItem(key, version)
+  }
+} catch (_) {}
+
 function read<T>(k: string): T | null {
   try {
     const raw = localStorage.getItem(K(k))
@@ -357,13 +398,13 @@ async function readInfo(): Promise<{ name: string; week: number | null }> {
 }
 
 /** 读一次页面正文判定，返回 ok / 当前地址 / 调试信息 */
-async function probe(): Promise<{ ok: boolean; url: string; len: number; head: string }> {
+async function probe(): Promise<{ ok: boolean; url: string; len: number }> {
   try {
     const raw = await engine.run(LOGGED_IN_JS)
     const p = typeof raw === 'string' ? JSON.parse(raw) : raw || {}
-    return { ok: !!p.ok, url: p.url || '', len: p.len || 0, head: p.head || '' }
-  } catch (e: any) {
-    return { ok: false, url: '', len: 0, head: 'probe-err:' + (e && e.message) }
+    return { ok: !!p.ok, url: p.url || '', len: p.len || 0 }
+  } catch (_) {
+    return { ok: false, url: '', len: 0 }
   }
 }
 
@@ -385,13 +426,12 @@ async function verifyOnce(): Promise<{ ok: boolean; url: string; last: string }>
   for (let i = 0; i < 8; i++) {
     const p = await probe()
     if (p.ok) {
-      log('verify ok', p.url)
       return { ok: true, url: p.url || landed, last }
     }
-    last = `len=${p.len} url=${(p.url || landed).slice(0, 120)} head=${p.head}`
+    last = `len=${p.len} url=${casPageKey(p.url || landed)}`
     await sleep(600)
   }
-  log('verify fail', last)
+  log('verify fail', 'verification')
   return { ok: false, url: landed, last }
 }
 
@@ -408,8 +448,11 @@ function casPageKey(url: string): string {
 const AUTO_LOGIN_COOLDOWN_MS = 5 * 60 * 1000
 const AUTO_LOGIN_TS_KEY = 'haust.autologin.lastAt'
 const CHAOXING_AUTO_LOGIN_TS_KEY = 'haust.cx.autologin.lastAt'
+const RUNTIME_VERSION_KEY = 'haust.runtime.lastVersion'
+const appUpdater = registerPlugin<{ getAppVersion(): Promise<{ versionCode: number }> }>('AppUpdater')
 let autoLoginTripped = false
 let chaoxingAutoLoginTripped = false
+let runtimeVersionCheck: Promise<boolean> | undefined
 
 function readLastAutoLoginAt(key = AUTO_LOGIN_TS_KEY): number {
   try {
@@ -424,6 +467,22 @@ function writeLastAutoLoginAt(ts: number, key = AUTO_LOGIN_TS_KEY) {
     if (ts > 0) localStorage.setItem(key, String(ts))
     else localStorage.removeItem(key)
   } catch (_) {}
+}
+
+function checkRuntimeVersion(): Promise<boolean> {
+  return runtimeVersionCheck ??= appUpdater.getAppVersion().then(({ versionCode }) => {
+    if (!Number.isSafeInteger(versionCode) || versionCode <= 0) return false
+    const version = String(versionCode)
+    if (localStorage.getItem(RUNTIME_VERSION_KEY) === version) return false
+    autoLoginTripped = false
+    writeLastAutoLoginAt(0)
+    resetChaoxingAutoLogin()
+    const cached = read<SessionStatus>('session')
+    // Invalidate the timestamp before recording the build so a killed process still rechecks it.
+    if (cached?.loggedIn) write('session', { ...cached, checkedAt: '', verified: false })
+    localStorage.setItem(RUNTIME_VERSION_KEY, version)
+    return true
+  }).catch(() => false)
 }
 
 async function statusNow(interactive = false, waitMs = 10 * 60 * 1000, credential: Credential | null = null, remember?: boolean): Promise<SessionStatus> {
@@ -446,7 +505,6 @@ async function statusNow(interactive = false, waitMs = 10 * 60 * 1000, credentia
         const cur = (await browser.currentUrl()).url
         if (cur && cur !== lastUrl) {
           lastUrl = cur
-          log('login overlay url', cur.slice(0, 140))
         }
       } catch (_) {}
       if (!open) break
@@ -462,8 +520,8 @@ async function statusNow(interactive = false, waitMs = 10 * 60 * 1000, credentia
       if (isEamsLanding(lastUrl) && clickedAt !== lastUrl) {
         try {
           if ((await overlay.run(LANDING_CLICK_JS)) === 'clicked') clickedAt = lastUrl
-        } catch (e: any) {
-          log('overlay landing click fail', e && e.message)
+        } catch (_) {
+          log('overlay landing click fail', 'verification')
         }
       }
       // 停在统一身份认证表单：每个 CAS 域名最多自动填 1 次（最多 2 道 CAS），遇锁定/密码错/验证码立即熔断
@@ -483,7 +541,6 @@ async function statusNow(interactive = false, waitMs = 10 * 60 * 1000, credentia
       }
     }
     await browser.close(verifiedInOverlay ? { successMessage: '✓ 教务登录成功，正在返回…' } : undefined).catch(() => undefined)
-    log('login overlay closed at', lastUrl.slice(0, 140))
   }
 
   // 用户手动点的「完成」可能早于 CAS 跳转结束：多验几次
@@ -539,32 +596,48 @@ async function statusNow(interactive = false, waitMs = 10 * 60 * 1000, credentia
   return st
 }
 
-async function driveSchoolAuth(credential: Credential, options: AuthOptions, background = false): Promise<SessionStatus> {
+type SchoolAuthResult = { session: SessionStatus; portalReady: boolean }
+
+async function driveSchoolAuth(credential: Credential, options: AuthOptions, background = false): Promise<SchoolAuthResult> {
   const { signal, onProgress } = options
+  let session: SessionStatus | undefined
   // driveAuth initially opens the WebView with silent: true.
   return driveAuth(browser, overlay.run, options, HOME, '教务系统统一认证', async ({ execute, readUrl, setRisk }) => {
     const submitted = new Set<string>()
     const retriedCaptcha = new Set<string>()
     let landing = ''
     let riskUrl = ''
-    const deadline = Date.now() + (background ? 70_000 : 5 * 60_000)
+    let deadline = Date.now() + (background ? 70_000 : 5 * 60_000)
     while (Date.now() < deadline) {
       const url = await readUrl()
       if (riskUrl && riskUrl !== url) {
         await setRisk(false)
         riskUrl = ''
       }
-      if (isEams(url) && !isEamsLanding(url)) {
+      if (session) {
+        if ((await execute(PORTAL_READY_JS)) === 'ready' && await hasNoticePortalCookie()) {
+          return { session, portalReady: true }
+        }
+        if (!isCasPage(url)) {
+          await authDelay(550, signal)
+          continue
+        }
+      } else if (isEams(url) && !isEamsLanding(url)) {
         const raw = await execute(LOGGED_IN_JS)
         if (typeof raw === 'string' && JSON.parse(raw)?.ok) {
           await setRisk(false)
           onProgress({ type: 'stage', message: '正在校验教务会话…' })
           const info = await execute(INFO_JS)
           const { name = '', week = null } = typeof info === 'string' ? JSON.parse(info) || {} : {}
-          return {
+          session = {
             loggedIn: true, verified: true, checkedAt: new Date().toISOString(), url,
             studentName: name, currentWeek: week
-          } satisfies SessionStatus
+          }
+          // Reuse the same CookieManager session and close the WebView after portal navigation.
+          deadline = Date.now() + PORTAL_TIMEOUT_MS
+          submitted.clear()
+          await execute(OPEN_PORTAL_JS)
+          continue
         }
       }
       if (isEamsLanding(url) && landing !== url && await execute(LANDING_CLICK_JS) === 'clicked') landing = url
@@ -573,7 +646,7 @@ async function driveSchoolAuth(credential: Credential, options: AuthOptions, bac
         const failure = classifyAuthError(page.error) || classifyAuthError(page.text)
         const risk = classifyAuthRisk(page)
         const key = casPageKey(url)
-        if (background && risk !== 'none') failAuth('captcha', '统一身份认证需要人工验证')
+        if ((background || session) && risk !== 'none') failAuth('captcha', '统一身份认证需要人工验证')
         const retryCaptcha = submitted.has(key) && failure?.reason === 'captcha' && risk === 'image' && !retriedCaptcha.has(key)
         if (failure && !retryCaptcha) throw new AuthFlowError(failure)
         if (risk === 'complex' || (risk === 'image' && !page.dataUrl)) {
@@ -584,7 +657,7 @@ async function driveSchoolAuth(credential: Credential, options: AuthOptions, bac
             await setRisk(false)
             riskUrl = ''
           }
-          if (isCasPage(url) && (retryCaptcha || (!submitted.has(key) && submitted.size < 2))) {
+          if (isCasPage(url) && (retryCaptcha || (!submitted.has(key) && submitted.size < (session ? 1 : 2)))) {
             let code: string | undefined
             if (risk === 'image' && page.dataUrl) {
               const answer = await waitForAuthInput<CaptchaAnswer>(signal, (respond) => {
@@ -602,7 +675,7 @@ async function driveSchoolAuth(credential: Credential, options: AuthOptions, bac
             }))) === 'submitted') {
               if (retryCaptcha) retriedCaptcha.add(key)
               submitted.add(key)
-              onProgress({ type: 'stage', message: '正在校验教务会话…' })
+              if (!session) onProgress({ type: 'stage', message: '正在校验教务会话…' })
               await authDelay(1100, signal)
             }
           }
@@ -611,6 +684,10 @@ async function driveSchoolAuth(credential: Credential, options: AuthOptions, bac
       await authDelay(550, signal)
     }
     return failAuth('timeout', '统一身份认证登录超时，请重试')
+  }).catch((error: unknown) => {
+    if (!session || signal.aborted) throw error
+    log(background ? 'silentReloginSchool fail' : 'notice portal warmup fail', authFailureReason(error))
+    return { session, portalReady: false }
   })
 }
 
@@ -630,7 +707,7 @@ async function loginSchoolSilently(request: SchoolLogin, options: AuthOptions): 
   localStorage.removeItem(AIRCON_FAIL_TS_KEY)
   onProgress({ type: 'stage', message: '正在连接统一身份认证…' })
   try {
-    const session = await driveSchoolAuth(request, options)
+    const { session } = await driveSchoolAuth(request, options)
     signal.throwIfAborted()
     const status: SessionStatus = session
     try {
@@ -670,20 +747,31 @@ function single<T>(key: string, fn: () => Promise<T>): Promise<T> {
   return p
 }
 
-async function silentReloginSchool(credential: Credential): Promise<SessionStatus> {
-  return driveSchoolAuth(credential, {
-    signal: new AbortController().signal,
-    onProgress: () => {}
-  }, true)
+async function silentReloginSchool(credential: Credential): Promise<SchoolAuthResult> {
+  try {
+    return await driveSchoolAuth(credential, {
+      signal: new AbortController().signal,
+      onProgress: () => {}
+    }, true)
+  } catch (error) {
+    log('silentReloginSchool fail', authFailureReason(error))
+    throw error
+  }
 }
 
 /** 调用方已持有 withEngine 锁，续登与验活在同一队列操作内完成。 */
-async function ensureSession(): Promise<SessionStatus> {
+async function ensureSession(
+  { forceRelogin = false, verifyPortal = false }: { forceRelogin?: boolean; verifyPortal?: boolean } = {}
+): Promise<SessionStatus & { portalReady?: boolean }> {
+  await checkRuntimeVersion()
   const previousName = read<SessionStatus>('session')?.studentName
-  const st = await statusNow(false)
+  const portalReady = verifyPortal && !forceRelogin && await hasNoticePortalCookie().catch(() => false)
+  const st = forceRelogin || (verifyPortal && !portalReady)
+    ? { loggedIn: false, checkedAt: new Date().toISOString() }
+    : await statusNow(false)
   if (st.loggedIn) {
     autoLoginTripped = false
-    return st
+    return verifyPortal ? { ...st, portalReady } : st
   }
   if (autoLoginTripped) {
     log('auto login skipped: fuse tripped')
@@ -694,18 +782,21 @@ async function ensureSession(): Promise<SessionStatus> {
     log('auto login skipped: cooldown active')
     return st
   }
-  const credential = await readCred().catch(() => null)
+  const credential = await readCred().catch((error: unknown) => {
+    log('silentReloginSchool fail', authFailureReason(error))
+    return null
+  })
   const account = localStorage.getItem(SCHOOL_IDENTITY_KEY)
   if (!credential || (account && account !== credential.username)) return st
   writeLastAutoLoginAt(now)
   try {
-    const session = await silentReloginSchool(credential)
+    const { session, portalReady } = await silentReloginSchool(credential)
     if (previousName && session.studentName && previousName !== session.studentName) clearAccountCache()
     localStorage.setItem(SCHOOL_IDENTITY_KEY, credential.username)
     write('session', session)
     autoLoginTripped = false
     emitSession(session)
-    return session
+    return verifyPortal ? { ...session, portalReady } : session
   } catch (_) {
     autoLoginTripped = true
     return st
@@ -722,7 +813,10 @@ async function recoverSession(): Promise<boolean> {
 function recoverNoticeSession(version: number): Promise<boolean> {
   return single('notices:recover:' + version, () => withEngine(async () => {
     checkNoticeSession(version)
-    return recoverSession()
+    // The notice request already rejected the session, including any cookie still in the jar.
+    const session = await ensureSession({ forceRelogin: true, verifyPortal: true })
+    checkNoticeSession(version)
+    return session.portalReady === true
   })).catch(() => false)
 }
 
@@ -830,6 +924,7 @@ const readAircon = createCloudPaymentSession(async (url, headers) => {
 
 let studyMigration: Promise<void> | undefined
 let chaoxingCacheVersion = 0
+let chaoxingReloginGeneration = 0
 const chaoxingCacheKeys = ['chaoxing', 'chaoxing.activities', 'chaoxing.progress']
 
 function clearChaoxingCache() {
@@ -870,15 +965,18 @@ function cachedChaoxingCourses<T extends ChaoxingActivitiesResult | ChaoxingProg
     try {
       await prepareStudyData()
       if (version !== chaoxingCacheVersion) return empty
+      const reloginGeneration = chaoxingReloginGeneration
       let result: T | undefined
       try {
         result = await fetchFast()
+        if (result.authRequired) throw new chaoxing.ChaoxingAuthError()
       } catch (fastError) {
         if (fastError instanceof chaoxing.ChaoxingRiskError) throw fastError
         if (fastError instanceof chaoxing.ChaoxingAuthError) {
-          const recovered = await single('chaoxing:relogin:' + version, () =>
-            withEngine(() => version === chaoxingCacheVersion ? silentReloginChaoxing() : Promise.resolve(false))
-          )
+          const recovered = await single('chaoxing:relogin:' + version, () => withEngine(async () =>
+            version === chaoxingCacheVersion &&
+            (reloginGeneration !== chaoxingReloginGeneration || await silentReloginChaoxing())
+          ))
           if (!recovered || version !== chaoxingCacheVersion) throw fastError
           result = await fetchFast()
         } else {
@@ -925,9 +1023,13 @@ function resetChaoxingAutoLogin() {
 }
 
 async function silentReloginChaoxing(): Promise<boolean> {
+  await checkRuntimeVersion()
   const now = Date.now()
   if (chaoxingAutoLoginTripped || now - readLastAutoLoginAt(CHAOXING_AUTO_LOGIN_TS_KEY) < AUTO_LOGIN_COOLDOWN_MS) return false
-  const credential = await readChaoxingCred().catch(() => null)
+  const credential = await readChaoxingCred().catch((error: unknown) => {
+    log('silentReloginChaoxing fail', authFailureReason(error))
+    return null
+  })
   if (!credential) return false
 
   writeLastAutoLoginAt(now, CHAOXING_AUTO_LOGIN_TS_KEY)
@@ -953,12 +1055,18 @@ async function silentReloginChaoxing(): Promise<boolean> {
         if (event.type === 'captcha' || (event.type === 'risk' && event.revealed)) controller.abort()
       }
     })
-    controller.signal.throwIfAborted()
+    await authDelay(350, controller.signal)
     const dashboard = await chaoxing.fetchChaoxingDashboard(engine)
-    return dashboard.loggedIn && !dashboard.authRequired
+    if (dashboard.loggedIn && !dashboard.authRequired) {
+      chaoxingReloginGeneration += 1
+      return true
+    }
+    log('silentReloginChaoxing fail', dashboard.authRequired ? 'verification' : 'network')
+    return false
   } catch (error) {
-    const reason = error instanceof AuthFlowError ? error.failure.reason : undefined
-    if (controller.signal.aborted || reason === 'captcha' || reason === 'credentials' || reason === 'locked' || reason === 'rate_limit') {
+    const reason = controller.signal.aborted ? 'captcha' : authFailureReason(error)
+    log('silentReloginChaoxing fail', reason)
+    if (reason === 'captcha' || reason === 'credentials' || reason === 'locked' || reason === 'rate_limit') {
       chaoxingAutoLoginTripped = true
     }
     return false
@@ -1108,7 +1216,8 @@ export const androidApi = {
   /* 状态判定也要排队：它同样会 load 隐藏 WebView，插队会把别人的页面顶掉 */
   status: () =>
     withEngine(async () => {
-      const cached = read<any>('session')
+      await checkRuntimeVersion()
+      const cached = read<SessionStatus>('session')
       // 只缓存「已登录」6 小时，避免每次装包或切换界面反复探活触发学校风控
       if (
         cached &&
@@ -1333,6 +1442,14 @@ export const androidApi = {
     }),
 
   cached: () => withEngine(async () => {
+    const buildChanged = await checkRuntimeVersion()
+    const session = read<SessionStatus>('session')
+    if (buildChanged || (session?.loggedIn && !session.checkedAt)) {
+      // React may skip status() when its startup snapshot is still within the refresh TTL.
+      void androidApi.status().catch((error: unknown) => {
+        log('startup session check fail', authFailureReason(error))
+      })
+    }
     // 首次读取缓存时迁移，即使已有有效会话或设备断网。
     await readCred().catch(() => null)
     await prepareStudyData()
@@ -1346,7 +1463,7 @@ export const androidApi = {
       notices: noticeCache,
       chargers: read('chargers'),
       card: read('card'),
-      session: read('session')
+      session
     }
   }),
 

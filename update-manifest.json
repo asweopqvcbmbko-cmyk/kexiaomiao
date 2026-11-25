@@ -1,19 +1,19 @@
 {
-    "updatedAt":  "2026-11-25T07:57:47Z",
+    "updatedAt":  "2026-11-25T08:26:07Z",
     "schemaVersion":  1,
     "beta":  {
                  "mirrors":  [
-                                 "https://edgeone.gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.3-beta.2/kexiaomiao-v0.2.3-beta.2.apk",
-                                 "https://gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.3-beta.2/kexiaomiao-v0.2.3-beta.2.apk"
+                                 "https://edgeone.gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.3-beta.3/kexiaomiao-v0.2.3-beta.3.apk",
+                                 "https://gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.3-beta.3/kexiaomiao-v0.2.3-beta.3.apk"
                              ],
-                 "apkUrl":  "https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.3-beta.2/kexiaomiao-v0.2.3-beta.2.apk",
-                 "size":  3402527,
-                 "notes":  "- 彻底修复 VSB 学院/全校通知正文解析被 \u003ch2\u003e发布时间：...\u003c/h2\u003e 误杀导致正文不显示的问题（实测多学院 60~75ms 秒开）\n- 修复公网直连返回「系统提示：您无权访问此页面」（如机电学院、教务处等）时未自动切换 WebVPN 代理通道的 Bug\n- 包含 v0.2.3-beta.1 全部修复（通知缓存 v2 标题强校验、WebVPN 图片原生代理防裂图、学习通键盘黑屏修复、学习通 2 路小并发 HTTP 提速与 10 分钟缓存）",
-                 "publishedAt":  "2026-11-25T07:57:47Z",
-                 "sha256":  "d5741e627beb98cd0db922664f881d384116a491c7accaaa29cafe32426c449b",
+                 "apkUrl":  "https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.3-beta.3/kexiaomiao-v0.2.3-beta.3.apk",
+                 "size":  3403687,
+                 "notes":  "- 修复静默登录与原生密码登录未落盘 Cookie 的致命 Bug（SchoolBrowserPlugin 关闭隐藏 WebView 前强制 flushCookies）\n- 修复云端更新覆盖安装重启后教务与学习通静默重登失效：检测 versionCode 升级后自动清除冷却锁、跳过 6 小时盲信缓存并主动后台静默验活续登\n- 修复需要 WebVPN 登录的通知仍提示手动登录：教务登录/续登完成后自动在同一会话内打通并校验 WebVPN 门户（i-haust-edu-cn-s），通知认证失效时强制续签 WebVPN 票据\n- 通知缓存升级至 v3 全量自愈迁移：所有用户升级后自动清空历史脏正文、旧列表元数据与启动快照中的旧通知（完整保留已读记录），彻底解决材料学院等历史缓存冲突",
+                 "publishedAt":  "2026-11-25T08:26:07Z",
+                 "sha256":  "ba8d51d021fe46b4b2aa0994789af563ed3a0c9114aa5c7f96a6fe19e6b010c4",
                  "channel":  "beta",
-                 "versionName":  "0.2.3-beta.2",
-                 "versionCode":  26
+                 "versionName":  "0.2.3-beta.3",
+                 "versionCode":  27
              },
     "stable":  {
                    "mirrors":  [
@@ -53,6 +53,12 @@
                           "versionCode":  26,
                           "versionName":  "0.2.3-beta.2",
                           "notes":  "- 彻底修复 VSB 学院/全校通知正文解析被 \u003ch2\u003e发布时间：...\u003c/h2\u003e 误杀导致正文不显示的问题（实测多学院 60~75ms 秒开）\n- 修复公网直连返回「系统提示：您无权访问此页面」（如机电学院、教务处等）时未自动切换 WebVPN 代理通道的 Bug\n- 包含 v0.2.3-beta.1 全部修复（通知缓存 v2 标题强校验、WebVPN 图片原生代理防裂图、学习通键盘黑屏修复、学习通 2 路小并发 HTTP 提速与 10 分钟缓存）"
+                      },
+                      {
+                          "channel":  "beta",
+                          "versionCode":  27,
+                          "versionName":  "0.2.3-beta.3",
+                          "notes":  "- 修复静默登录与原生密码登录未落盘 Cookie 的致命 Bug（SchoolBrowserPlugin 关闭隐藏 WebView 前强制 flushCookies）\n- 修复云端更新覆盖安装重启后教务与学习通静默重登失效：检测 versionCode 升级后自动清除冷却锁、跳过 6 小时盲信缓存并主动后台静默验活续登\n- 修复需要 WebVPN 登录的通知仍提示手动登录：教务登录/续登完成后自动在同一会话内打通并校验 WebVPN 门户（i-haust-edu-cn-s），通知认证失效时强制续签 WebVPN 票据\n- 通知缓存升级至 v3 全量自愈迁移：所有用户升级后自动清空历史脏正文、旧列表元数据与启动快照中的旧通知（完整保留已读记录），彻底解决材料学院等历史缓存冲突"
                       }
                   ]
 }

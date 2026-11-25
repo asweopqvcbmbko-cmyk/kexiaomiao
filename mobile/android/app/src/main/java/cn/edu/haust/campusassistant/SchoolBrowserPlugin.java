@@ -247,19 +247,17 @@ public class SchoolBrowserPlugin extends Plugin {
                         if (request != null && request.isForMainFrame()) {
                             String upgraded = upgradeChaoxingHttp(request.getUrl());
                             if (upgraded != null) {
-                                android.util.Log.i("SchoolBrowser", "upgrading cleartext chaoxing redirect to https: " + upgraded);
+                                android.util.Log.i("SchoolBrowser", "upgrading cleartext Chaoxing redirect to HTTPS");
                                 overlayUrl = upgraded;
                                 view.loadUrl(upgraded);
                                 return;
                             }
                             if (silent) {
                                 int code = error != null ? error.getErrorCode() : WebViewClient.ERROR_UNKNOWN;
-                                CharSequence desc = error != null ? error.getDescription() : "";
-                                android.util.Log.w("SchoolBrowser", "silent mainFrame error code=" + code
-                                        + " desc=" + desc + " url=" + request.getUrl());
+                                android.util.Log.w("SchoolBrowser", "silent mainFrame error code=" + code);
                                 // ERROR_UNKNOWN (-1) 常由页面重定向或脚本跳转中断前一个导航触发，不应判为网络故障
                                 if (code != WebViewClient.ERROR_UNKNOWN) {
-                                    overlayUrl = "load-error:" + code + ":" + desc;
+                                    overlayUrl = "load-error:" + code;
                                 }
                             }
                         }
@@ -464,6 +462,7 @@ public class SchoolBrowserPlugin extends Plugin {
         }
         overlayClosing = true;
         if (!overlayVisible) {
+            flushCookies();
             closeOverlay();
             if (onFinished != null) onFinished.run();
             return;
@@ -516,13 +515,13 @@ public class SchoolBrowserPlugin extends Plugin {
         overlayClosing = false;
         authOverlay = false;
         overlayVisible = false;
+        flushCookies();
         if (overlayView != null) {
             overlayView.removeAllViews();
             overlayView.destroy();
             overlayView = null;
         }
         overlayUrl = "";
-        flushCookies();
     }
 
     @PluginMethod
@@ -634,9 +633,13 @@ public class SchoolBrowserPlugin extends Plugin {
 
     /** 把 Cookie 立刻写盘（WebView 默认只在合适的时机异步刷，进程被杀就没了） */
     private void flushCookies() {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            main.post(this::flushCookies);
+            return;
+        }
         try {
             CookieManager.getInstance().flush();
-        } catch (Exception ignored) {
+        } catch (RuntimeException ignored) {
         }
     }
 

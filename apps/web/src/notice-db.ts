@@ -6,7 +6,7 @@
 import type { NoticeBody, NoticeItem } from './types'
 
 export const NOTICE_DB_NAME = 'haust_notices_v1'
-export const NOTICE_DB_VERSION = 2
+export const NOTICE_DB_VERSION = 3
 export const NOTICE_MAX_ITEMS = 300
 const NOTICE_BODY_VERSION = 2
 
@@ -214,8 +214,11 @@ function openNoticeDb(): Promise<IDBDatabase | null> {
         }
         if (!db.objectStoreNames.contains('bodies')) {
           db.createObjectStore('bodies', { keyPath: 'key' })
-        } else if (event.oldVersion < 2) {
-          req.transaction!.objectStore('bodies').clear()
+        }
+        if (event.oldVersion < 3) {
+          const tx = req.transaction!
+          tx.objectStore('bodies').clear()
+          tx.objectStore('notices').clear()
         }
       }
       req.onsuccess = () => {
@@ -279,7 +282,7 @@ export async function upsertNotices(items: NoticeItem[], maxItems = NOTICE_MAX_I
   if (!db) {
     for (const row of normalized) {
       const prev = memNotices.get(row.key)
-      memNotices.set(row.key, prev ? { ...prev, ...row, cachedAt: prev.cachedAt || now } : row)
+      memNotices.set(row.key, { ...row, cachedAt: prev?.cachedAt || now })
     }
     const sorted = sortNoticesDesc(Array.from(memNotices.values()))
     if (sorted.length > maxItems) {

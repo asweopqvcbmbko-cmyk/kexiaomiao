@@ -24,8 +24,11 @@ import {
 } from '../src/college-notices.ts'
 import { createCloudPaymentSession } from '../../desktop/src/lib/aircon-session.mjs'
 import {
+  NOTICE_DB_NAME,
+  NOTICE_DB_VERSION,
   WebVpnAuthError,
   collectIncrementalPages,
+  getAllNotices,
   getCachedNoticeBody,
   normalizeNoticeKey,
   saveNoticeBody,
@@ -1200,6 +1203,83 @@ async function runTests() {
   assert.deepEqual(jdTried, [
     'https://jd.haust.edu.cn/info/1001/901.htm',
     'https://jd-haust-edu-cn-s.haust.edu.cn/info/1001/901.htm'
+  ])
+
+  // 43. Notice schema v3 clears both stores on upgrade without changing read state.
+  assert.equal(NOTICE_DB_VERSION, 3)
+  const stores = new Map([
+    ['notices', new Map([['cl:1204_21939', { title: 'Legacy metadata' }]])],
+    ['bodies', new Map([['cl:1204_21939', { text: 'Legacy body' }]])]
+  ])
+  const readStateKey = 'haust-kxm-read-v1'
+  const readState = JSON.stringify(['cl:1204_21939'])
+  const storage = new Map([[readStateKey, readState]])
+  const testGlobals = {
+    localStorage: {
+      getItem: (key) => storage.get(key) ?? null,
+      setItem: (key, value) => storage.set(key, value),
+      removeItem: (key) => storage.delete(key)
+    },
+    indexedDB: {
+      open(name, version) {
+        assert.equal(name, NOTICE_DB_NAME)
+        assert.equal(version, 3)
+        const request = {
+          result: {
+            objectStoreNames: { contains: (name) => stores.has(name) },
+            transaction: () => ({
+              objectStore: () => ({
+                getAll() {
+                  const read = { result: [...stores.get('notices').values()] }
+                  queueMicrotask(() => read.onsuccess())
+                  return read
+                }
+              })
+            })
+          },
+          transaction: { objectStore: (name) => stores.get(name) }
+        }
+        queueMicrotask(() => {
+          request.onupgradeneeded({ oldVersion: 2 })
+          request.onsuccess()
+        })
+        return request
+      }
+    }
+  }
+  const descriptors = Object.keys(testGlobals).map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)])
+  try {
+    for (const [key, value] of Object.entries(testGlobals)) {
+      Object.defineProperty(globalThis, key, { configurable: true, value })
+    }
+    const { getAllNotices: openUpgradedNotices } = await import('../src/notice-db.ts?upgrade-v3')
+    assert.deepEqual(await openUpgradedNotices(), [])
+    assert.equal(stores.get('bodies').size, 0)
+    assert.equal(localStorage.getItem(readStateKey), readState)
+  } finally {
+    for (const [key, descriptor] of descriptors) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor)
+      else delete globalThis[key]
+    }
+  }
+
+  // 44. Fresh metadata replaces the stored row, including a mirror that has disappeared.
+  const oldNotice = { ...makeNotice(302, '2026-11-23'), mirrorUrl: 'https://i.haust.edu.cn/view/302' }
+  const freshNotice = {
+    ...makeNotice(302, '2026-11-25'),
+    url: 'https://jwc-haust-edu-cn-s.haust.edu.cn/content.jsp?wbtreeid=1024&wbnewsid=302',
+    title: 'Updated title',
+    sourceName: 'Updated source',
+    dept: 'Updated department'
+  }
+  const noticeKey = normalizeNoticeKey(oldNotice)
+  assert.equal(normalizeNoticeKey(freshNotice), noticeKey)
+  await upsertNotices([oldNotice])
+  await upsertNotices([freshNotice])
+  const rows = (await getAllNotices()).filter((item) => normalizeNoticeKey(item) === noticeKey)
+  assert.equal(rows.length, 1)
+  assert.deepEqual(rows.map(({ key, cachedAt, ...metadata }) => metadata), [
+    { ...freshNotice, id: '1024_302' }
   ])
 
   console.log('ALL OFFLINE UNIT TESTS PASSED')
