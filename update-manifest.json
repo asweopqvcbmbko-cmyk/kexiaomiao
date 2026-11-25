@@ -1,19 +1,19 @@
 {
-    "updatedAt":  "2026-11-25T04:01:49Z",
+    "updatedAt":  "2026-11-25T04:38:33Z",
     "schemaVersion":  1,
     "beta":  {
                  "mirrors":  [
-                                 "https://edgeone.gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2-beta.4/kexiaomiao-v0.2.2-beta.4.apk",
-                                 "https://gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2-beta.4/kexiaomiao-v0.2.2-beta.4.apk"
+                                 "https://edgeone.gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2-beta.5/kexiaomiao-v0.2.2-beta.5.apk",
+                                 "https://gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2-beta.5/kexiaomiao-v0.2.2-beta.5.apk"
                              ],
-                 "apkUrl":  "https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2-beta.4/kexiaomiao-v0.2.2-beta.4.apk",
-                 "size":  3381267,
-                 "notes":  "1. 校园通知列表与正文全面接入校园网/WebVPN 后台静默续登；2. 移除通知页顶部残留的重复订阅按钮，新增学院拉取期间显示清爽同步加载态；3. 修复仪表盘左滑忽略用力拉动露白边及文字居中对齐问题。",
-                 "publishedAt":  "2026-11-25T04:01:49Z",
-                 "sha256":  "dd4e4ba6bf2d83035dd28b2dc6d079997da78f6bbe4bec4bb962a0e4bf283f0c",
+                 "apkUrl":  "https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2-beta.5/kexiaomiao-v0.2.2-beta.5.apk",
+                 "size":  3388467,
+                 "notes":  "1. 「我的」页面全新重构为系统更新/关于本机卡片矩阵风格，新增精致克制极光流光 Hero 卡与 2×2 快捷磁贴\n2. 校园通知列表与正文改为原生 HTTP 全源并发直连（提速 10–20×），脱离隐藏 WebView 串行阻塞，异常自动回退兜底\n3. 学习通课程进度与活动拉取自动跳过已忽略课程（兼容全称与旧版截断名），减少无效请求",
+                 "publishedAt":  "2026-11-25T04:38:33Z",
+                 "sha256":  "ac9c442f29dd476c7bbd8114e40602fed7389b2b9a08c7a02d2796aee51b1b13",
                  "channel":  "beta",
-                 "versionName":  "0.2.2-beta.4",
-                 "versionCode":  20
+                 "versionName":  "0.2.2-beta.5",
+                 "versionCode":  21
              },
     "stable":  {
                    "mirrors":  [

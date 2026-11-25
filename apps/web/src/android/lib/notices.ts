@@ -1,6 +1,7 @@
 // @ts-nocheck —— 从桌面端逐行移植并增强的纯逻辑模块（支持双网 ID 归一化 + 第 1 页增量截断）。
 import { WebVpnAuthError, normalizeNoticeItem } from '../../notice-db.ts'
 import { getSubscribedCollegeSources, isCollegeSource, type CollegeSource } from '../../college-notices.ts'
+import type { NoticeBody, NoticeItem } from '../../types'
 
 /**
  * 通知聚合适配器
@@ -15,10 +16,41 @@ const PORTAL_URL = 'https://i-haust-edu-cn-s.haust.edu.cn/main.html#/NewsCenter'
 const JWC_LIST_DIRECT = 'https://jwc.haust.edu.cn/tzgg.htm'
 const JWC_LIST = 'https://jwc-haust-edu-cn-s.haust.edu.cn/tzgg.htm'
 
-const PORTAL_COLUMNS_JSON = JSON.stringify([
+const PORTAL_ORIGIN = new URL(PORTAL_URL).origin
+const PORTAL_COLUMNS = [
   { id: 'remote-1120073', tag: 'school', name: '全校通知' },
   { id: 'remote-1120074', tag: 'news', name: '校园新闻' }
-])
+]
+const PORTAL_COLUMNS_JSON = JSON.stringify(PORTAL_COLUMNS)
+
+export type NoticeHttpResponse = { status: number; url: string; data: string }
+export type NoticeHttpClient = {
+  get(url: string, opts?: { headers?: Record<string, string>; timeoutMs?: number }): Promise<NoticeHttpResponse>
+  getCookies?(url: string): Promise<string>
+}
+
+type NoticeListOptions = { existingKeys?: Set<string> | string[]; maxInitialPages?: number; collegeIds?: string[] }
+type NoticeListItem = NoticeItem & { mirrorUrl?: string }
+type NoticeListResult = {
+  fetchedAt: string
+  items: NoticeListItem[]
+  portalAuthRequired: boolean
+  authRequired: boolean
+  failedSources: string[]
+}
+
+export function sortAndMatchMirrors(items: NoticeListItem[]) {
+  items.sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))
+  const titleKey = (item: NoticeListItem) => String(item.title || '').replace(/\s+/g, '')
+  const mirrors = new Map(items
+    .filter((item) => (item.source === 'school' || item.source === 'news') && item.url)
+    .map((item) => [titleKey(item), item.url]))
+  for (const item of items) {
+    const mirror = item.source === 'jwc' && mirrors.get(titleKey(item))
+    if (mirror) item.mirrorUrl = mirror
+  }
+  return items
+}
 
 function buildPortalListStartJs(pageNo = 1) {
   return `(() => {
@@ -32,12 +64,12 @@ function buildPortalListStartJs(pageNo = 1) {
     finished += 1;
     if (finished === cols.length) {
       const out = [];
-      let okCount = 0;
+      const okSources = [];
       for (const item of results) {
-        if (item.ok) okCount += 1;
+        if (item.ok) okSources.push(item.source);
         for (const row of item.items) out.push(row);
       }
-      window.__haustPortalNotices = { done: true, okCount, items: out };
+      window.__haustPortalNotices = { done: true, okCount: okSources.length, okSources, items: out };
     }
   };
   for (const c of cols) {
@@ -63,7 +95,7 @@ function buildPortalListStartJs(pageNo = 1) {
             dept: norm(it.releaseDeptName),
             url: it.url || ''
           }));
-          finishOne({ ok: true, items: list });
+          finishOne({ ok: true, source: c.tag, items: list });
         } catch (_) {
           finishOne({ ok: false, items: [] });
         }
@@ -299,7 +331,8 @@ function isLoginLandingUrl(url) {
   return /\/cas\/login|vpn\.haust\.edu\.cn\/portal|loginExt|passport|auth\.htm/i.test(String(url || ''))
 }
 
-async function fetchList(engine, options: { existingKeys?: Set<string> | string[]; maxInitialPages?: number; collegeIds?: string[] } = {}) {
+async function fetchList(engine, options: NoticeListOptions = {}, http?: NoticeHttpClient) {
+  if (http) return fetchListFast(http, options)
   const existingKeys = options.existingKeys instanceof Set
     ? options.existingKeys
     : new Set(Array.isArray(options.existingKeys) ? options.existingKeys : [])
@@ -317,6 +350,7 @@ async function fetchList(engine, options: { existingKeys?: Set<string> | string[
   let succeededSources = 0
   let portalAuthRequired = false
   let authRedirectCount = 0
+  const failedSources = new Set(['school', 'news', 'jwc', ...getSubscribedCollegeSources(options.collegeIds || []).map(({ id }) => id)])
 
   /** 遍历完整一页并用内存 Set 过滤（防置顶旧公告误截断）；命中任意已缓存主键返回 true */
   const ingestPage = (rawList) => {
@@ -353,6 +387,9 @@ async function fetchList(engine, options: { existingKeys?: Set<string> | string[
         if (!parsed || parsed.okCount <= 0) break
         portalOk = true
         const pageItems = parsed.items || []
+        const okSources = parsed.okSources ?? (parsed.okCount === PORTAL_COLUMNS.length
+          ? PORTAL_COLUMNS.map(({ tag }) => tag) : pageItems.map(({ source }) => source))
+        for (const source of okSources) failedSources.delete(source)
         if (!pageItems.length) break
         const hitCached = ingestPage(pageItems)
         if (hitCached) break
@@ -389,6 +426,7 @@ async function fetchList(engine, options: { existingKeys?: Set<string> | string[
       }
       if (jwcOk) {
         succeededSources += 1
+        failedSources.delete('jwc')
         break
       }
     } catch (_) {}
@@ -406,7 +444,10 @@ async function fetchList(engine, options: { existingKeys?: Set<string> | string[
         const raw = await engine.run(listJs)
         const arr = typeof raw === 'string' ? JSON.parse(raw) : raw
         if (!Array.isArray(arr) || !arr.length) break
-        if (pageNo === 1) succeededSources += 1
+        if (pageNo === 1) {
+          succeededSources += 1
+          failedSources.delete(college.id)
+        }
         const hitCached = ingestPage(arr)
         if (hitCached || pageNo >= pageLimit) break
         const next = String((await engine.run(NEXT_PAGE_JS)) || '').replace(/^http:/i, 'https:')
@@ -423,26 +464,13 @@ async function fetchList(engine, options: { existingKeys?: Set<string> | string[
     throw new Error('全部通知源抓取失败，请检查网络或登录状态后重试')
   }
 
-  items.sort((a, b) => String(b.date).localeCompare(String(a.date)))
-
   // 教务处详情页有防盗链，通道域名会被 302 回普通域名而拦截。
   // 同一篇通知通常也发在“全校通知”里，按标题匹配一份镜像地址（走 www 通道域名，正文可取）。
-  const schoolByTitle = {}
-  for (const it of items) {
-    if ((it.source === 'school' || it.source === 'news') && it.url) {
-      schoolByTitle[String(it.title).replace(/\s+/g, '')] = it.url
-    }
-  }
-  for (const it of items) {
-    if (it.source !== 'jwc') continue
-    const key = String(it.title).replace(/\s+/g, '')
-    if (schoolByTitle[key]) it.mirrorUrl = schoolByTitle[key]
-  }
-
-  return { fetchedAt: new Date().toISOString(), items: items, portalAuthRequired, authRequired: portalAuthRequired }
+  return { fetchedAt: new Date().toISOString(), items: sortAndMatchMirrors(items), portalAuthRequired, authRequired: portalAuthRequired, failedSources: [...failedSources] }
 }
 
-async function fetchBody(engine, item) {
+async function fetchBody(engine, item, http?: NoticeHttpClient) {
+  if (http) return fetchBodyFast(http, item)
   const diagnostics = []
   const publicCollege = isCollegeSource(item.source)
   const rawId = String(item.id || '')
@@ -562,6 +590,418 @@ async function fetchBody(engine, item) {
     sourceUrl,
     pageType: last?.pageType || 'unknown'
   }
+}
+
+type HtmlNode = {
+  tag: string
+  attrs: Record<string, string>
+  children: (HtmlNode | string)[]
+  parent?: HtmlNode
+}
+
+const HTML_IGNORED = new Set(['script', 'style', 'noscript', 'template'])
+const HTML_VOID = new Set('area base br col embed hr img input link meta param source track wbr'.split(' '))
+const HTML_BLOCK = new Set('br p div li h1 h2 h3 h4 h5 h6 tr table section article'.split(' '))
+const htmlSpace = (value = '') => value.replace(/\s+/g, ' ').trim()
+
+const SIMPLE_ENTITIES = new Map(Object.entries({
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', ensp: ' ', emsp: ' ',
+  hellip: '…', ndash: '–', mdash: '—', middot: '·', laquo: '«', raquo: '»'
+}))
+
+function decodeHtml(value: string): string {
+  return value.replace(/&(#x[\da-f]+|#\d+|[a-z]+);/gi, (entity, key) => {
+    if (key[0] !== '#') return SIMPLE_ENTITIES.get(key.toLowerCase()) ?? entity
+    const point = /^#x/i.test(key) ? parseInt(key.slice(2), 16) : Number(key.slice(1))
+    return point > 0 && point <= 0x10ffff && !(point >= 0xd800 && point <= 0xdfff)
+      ? String.fromCodePoint(point) : '\ufffd'
+  })
+}
+
+function parseHtml(html: string): HtmlNode {
+  const root: HtmlNode = { tag: '#document', attrs: {}, children: [] }
+  if (typeof DOMParser !== 'undefined') {
+    const appendDom = (parent: HtmlNode, dom: Node) => {
+      if (dom.nodeType === 3) parent.children.push(dom.nodeValue || '')
+      if (dom.nodeType !== 1) return
+      const element = dom as Element
+      const tag = element.localName
+      if (HTML_IGNORED.has(tag)) return
+      const attrs = Object.fromEntries(Array.from(element.attributes, ({ name, value }) => [name, value]))
+      const node: HtmlNode = { tag, attrs, children: [], parent }
+      parent.children.push(node)
+      for (const child of element.childNodes) appendDom(node, child)
+    }
+    appendDom(root, new DOMParser().parseFromString(html, 'text/html').documentElement)
+    return root
+  }
+
+  // VSB fixtures in Node need only text, attributes and ancestry. Never execute markup.
+  const stack = [root]
+  const markup = html.replace(/<!--[\s\S]*?(?:-->|$)|<(script|style|noscript|template)\b[^>]*>[\s\S]*?(?:<\/\1\s*>|$)/gi, '')
+  const tokens = /<\/?[a-z][\w:-]*(?:[^"'<>]|"[^"]*"|'[^']*')*>|<![^>]*>|[^<]+|</gi
+  for (const [token] of markup.matchAll(tokens)) {
+    const opening = /^<(\/?)([\w:-]+)\b/i.exec(token)
+    if (!opening) {
+      if (!token.startsWith('<!')) stack.at(-1)!.children.push(decodeHtml(token))
+      continue
+    }
+    const tag = opening[2].toLowerCase()
+    const last = stack.findLastIndex((node) => node.tag === tag)
+    if (opening[1]) {
+      if (last > 0) stack.length = last
+      continue
+    }
+    if (last > 0 && ['li', 'tr', 'td', 'p', 'a'].includes(tag)) stack.length = last
+    const attrs = Object.create(null)
+    const attributes = /([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>]+)))?/g
+    for (const [, key, quoted, single, bare] of token.slice(opening[0].length, -1).matchAll(attributes)) {
+      attrs[key.toLowerCase()] ??= decodeHtml(quoted ?? single ?? bare ?? '')
+    }
+    const parent = stack.at(-1)!
+    const node = { tag, attrs, children: [], parent }
+    parent.children.push(node)
+    if (!HTML_VOID.has(tag) && !token.endsWith('/>')) stack.push(node)
+  }
+  return root
+}
+
+function* htmlElements(node: HtmlNode): Generator<HtmlNode> {
+  for (const child of node.children) {
+    if (typeof child === 'string') continue
+    yield child
+    yield* htmlElements(child)
+  }
+}
+
+function htmlText(node: HtmlNode): string {
+  const text = node.children.map((child) => typeof child === 'string' ? child : htmlText(child)).join('')
+  return HTML_BLOCK.has(node.tag) ? text + '\n' : text
+}
+
+function asHttpsUrl(value: string, baseUrl: string): URL | undefined {
+  if (!value?.trim() || value.trim().startsWith('#')) return
+  try {
+    const url = new URL(value, baseUrl)
+    if (url.protocol === 'http:' && url.hostname.endsWith('.haust.edu.cn')) url.protocol = 'https:'
+    if (url.protocol === 'https:' && !url.username && !url.password) return url
+  } catch { /* Ignore malformed links. */ }
+}
+
+function noticeDate(text: string, allowShort = false): string {
+  const full = /\b(20\d{2})(?:[-/.]|\s*年\s*)(\d{1,2})(?:[-/.]|\s*月\s*)(\d{1,2})(?!\d)/.exec(text)
+  const short = allowShort && /(?:^|[^\d./-])(\d{1,2})-(\d{1,2})(?![\d./-])/.exec(text)
+  const date = full?.slice(1) || (short && [String(new Date().getFullYear()), ...short.slice(1)])
+  return date ? [date[0], date[1].padStart(2, '0'), date[2].padStart(2, '0')].join('-') : ''
+}
+
+function articleId(url: URL, allowStatic: boolean): string {
+  const id = url.searchParams.get('wbnewsid') ||
+    (allowStatic ? /\/info\/\d+\/(\d+)\.htm$/i.exec(url.pathname)?.[1] : '')
+  return id && /^\d+$/.test(id) ? id : ''
+}
+
+function readListDate(link: HtmlNode, allowShort: boolean) {
+  let shortDate = ''
+  for (let row = link.parent, depth = 0; row && depth < 4; row = row.parent, depth++) {
+    if (['body', 'main', 'html', '#document', 'ul', 'ol', 'table'].includes(row.tag)) break
+    const text = htmlText(row)
+    const date = noticeDate(text)
+    if (date) return date
+    if (allowShort && !shortDate) shortDate = noticeDate(text, true)
+    if (row.tag === 'li' || row.tag === 'tr') break
+  }
+  return shortDate
+}
+
+function parseVsbList(html: string, baseUrl: string, college?: CollegeSource) {
+  const root = parseHtml(html)
+  const items = new Map<string, NoticeListItem>()
+  let nextPageUrl = ''
+  const nodes = [...htmlElements(root)]
+  for (const link of nodes) {
+    if (link.tag !== 'a' || !link.attrs.href) continue
+    const url = asHttpsUrl(link.attrs.href, baseUrl)
+    if (!url) continue
+    const label = htmlSpace(htmlText(link))
+    if (!nextPageUrl && url.hostname === safeDomain(baseUrl) &&
+        (/^(下\s*页|下一页)$/.test(label || link.attrs.title) || link.attrs.rel === 'next')) {
+      nextPageUrl = url.href
+    }
+    const id = articleId(url, !!college)
+    const title = htmlSpace(link.attrs.title) || label
+    if (!id || !title || items.has(id)) continue
+    items.set(id, {
+      source: college?.id ?? 'jwc', sourceName: college?.shortName ?? '教务处',
+      id, title, date: readListDate(link, !!college), dept: college?.fullName ?? '教务处', url: url.href
+    })
+  }
+  const body = nodes.find((node) => node.tag === 'body') || root
+  const text = htmlText(body)
+  const login = isLoginHtml(baseUrl, nodes, text, items.size > 0)
+  const empty = !login && /暂无(?:相关)?(?:通知|公告|记录|数据|内容)|没有(?:相关)?(?:记录|数据)|共\s*0\s*条/.test(text)
+  return { items: [...items.values()], nextPageUrl, login, empty }
+}
+
+export function parseJwcListHtml(html: string, baseUrl: string) {
+  return parseVsbList(html, baseUrl)
+}
+
+export function parseCollegeListHtml(html: string, baseUrl: string, college: CollegeSource) {
+  return parseVsbList(html, baseUrl, college)
+}
+
+function isLoginHtml(url: string, nodes: HtmlNode[], text: string, article = false): boolean {
+  if (isLoginLandingUrl(url) || /\/(?:login|cas)(?:[/?.#]|$)/i.test(url.split(/[?#]/, 1)[0])) return true
+  if (nodes.some((node) => node.tag === 'input' && node.attrs.type?.toLowerCase() === 'password')) return true
+  return !article && /统一身份认证|统一认证|VPN\s*登录|用户登录|请先登录|登录后查看/.test(text)
+}
+
+const articleSelectors = [
+  (node: HtmlNode) => node.attrs.id?.startsWith('vsb_content'),
+  (node: HtmlNode) => hasClass(node, 'v_news_content'),
+  (node: HtmlNode) => hasClass(node, 'article-content'),
+  (node: HtmlNode) => node.tag === 'form' && node.attrs.name === '_newscontent_fromname',
+  (node: HtmlNode) => node.tag === 'article',
+  (node: HtmlNode) => node.tag === 'main',
+  (node: HtmlNode) => hasClass(node, 'content')
+]
+
+function hasClass(node: HtmlNode, name: string): boolean {
+  return node.attrs.class?.split(/\s+/).includes(name) ?? false
+}
+
+export function parseNoticeBodyHtml(html: string, baseUrl: string,
+  { expectedTitle = '', expectedId = '', publicCollege = false } = {}) {
+  const root = parseHtml(html)
+  const nodes = [...htmlElements(root)]
+  const documentBody = nodes.find((node) => node.tag === 'body') || root
+  const contentIndex = articleSelectors.findIndex((selector) => nodes.some(selector))
+  const content = contentIndex < 0 ? undefined : nodes.find(articleSelectors[contentIndex])
+  const articleNodes = content ? [...htmlElements(content)] : []
+  const heading = (node: HtmlNode) => ['h1', 'h2'].includes(node.tag) || hasClass(node, 'tit') || hasClass(node, 'title')
+  const titles = [...articleNodes.filter(heading), ...nodes.filter((node) => node.tag === 'h1' || node.tag === 'title')]
+    .map((node) => htmlSpace(htmlText(node))).filter(Boolean)
+  const compact = (value: string) => value.replace(/[《》【】\[\]（）()“”"'：:，,。.!！?？\s]/g, '').toLowerCase()
+  const targetTitle = compact(expectedTitle)
+  const matchingTitle = titles.find((value) => {
+    const title = compact(value)
+    return title && targetTitle && (title === targetTitle || title.includes(targetTitle) || targetTitle.includes(title))
+  })
+  const landed = asHttpsUrl(baseUrl, baseUrl)
+  const id = expectedId.replace(/^\d+_/, '')
+  const idMatch = landed && /^\d+$/.test(id) && [articleId(landed, true), landed.searchParams.get('id'),
+    landed.pathname.match(/\/(\d+)(?:\.[\w]+)?\/?$/)?.[1]].includes(id)
+  const text = content ? htmlText(content).replace(/[ \t\u00a0]+/g, ' ').replace(/\n\s*\n\s*\n/g, '\n\n').trim() : ''
+  const imgs = [...new Set(articleNodes.filter((node) => node.tag === 'img')
+    .map(({ attrs }) => asHttpsUrl(attrs['data-src'] || attrs.src, baseUrl)?.href).filter(Boolean))]
+  const attachments = new Map<string, { name: string; url: string }>()
+  // VSB may put attachment links next to its rich text container inside the article form.
+  const form = nodes.find(articleSelectors[3])
+  for (const node of form ? htmlElements(form) : articleNodes) {
+    if (node.tag !== 'a') continue
+    const { href, title } = node.attrs
+    if (!href || !/\.(pdf|docx?|xlsx?|pptx?|zip|rar|7z|wps)(?:[?#]|$)|download\.jsp|\/_upload\/|attach/i.test(href)) continue
+    const url = asHttpsUrl(href, baseUrl)?.href
+    if (url) attachments.set(url, { name: htmlSpace(htmlText(node)) || title || '附件', url })
+  }
+  const articleMatch = !!content && !!(matchingTitle || (contentIndex < 5 && idMatch)) &&
+    !!(text || imgs.length || attachments.size)
+  const pageText = htmlText(documentBody)
+  const login = isLoginHtml(baseUrl, nodes, pageText,
+    articleMatch && (publicCollege || !/^(?:请先登录|登录后查看|统一身份认证)/.test(text)))
+  return {
+    title: matchingTitle || titles[0] || '', text, imgs, attachments: [...attachments.values()],
+    date: noticeDate(pageText), url: baseUrl,
+    pageType: login ? 'login' : articleMatch ? 'article' : content ? 'content-unmatched' : 'page',
+    articleMatch: !login && articleMatch
+  }
+}
+
+type NoticePage = { items: NoticeListItem[]; nextPageUrl?: string }
+type NoticeSource = { id: string; load: () => Promise<NoticeListItem[]> }
+
+const noticeAuthError = () => new WebVpnAuthError('校园网认证已过期，当前显示离线缓存')
+const isAuthResponse = (response: NoticeHttpResponse) =>
+  response.status === 401 || (response.status >= 300 && response.status < 400) || isLoginLandingUrl(response.url)
+const isOkResponse = (response: NoticeHttpResponse) => response.status >= 200 && response.status < 300
+
+export async function fetchListFast(http: NoticeHttpClient, options: NoticeListOptions = {}): Promise<NoticeListResult> {
+  const existingKeys = new Set(options.existingKeys)
+  const maxPages = Math.max(1, Math.min(3, Math.floor(options.maxInitialPages || 3)))
+
+  async function paginate(source: string, start: string, readPage: (url: string) => Promise<NoticePage>) {
+    const limit = [...existingKeys].some((key) => key.startsWith(source + ':')) ? 1 : maxPages
+    const items = new Map<string, NoticeListItem>()
+    const visited = new Set<string>()
+    let next = start
+    for (let i = 0; i < limit && next && !visited.has(next); i++) {
+      let page: NoticePage
+      try {
+        page = await readPage(next)
+      } catch (error) {
+        if (i === 0) throw error
+        break
+      }
+      visited.add(next)
+      let hitCached = false
+      for (const raw of page.items) {
+        const item = normalizeNoticeItem(raw)
+        const key = item.source + ':' + item.id
+        if (existingKeys.has(key)) hitCached = true
+        if (!items.has(key)) items.set(key, item)
+      }
+      if (hitCached || !page.items.length) break
+      next = page.nextPageUrl || ''
+    }
+    return [...items.values()]
+  }
+
+  // Both portal columns share a cookie read and start their requests independently.
+  const portalCookies = Promise.resolve().then(() => http.getCookies?.(PORTAL_ORIGIN + '/'))
+  const portalSources: NoticeSource[] = PORTAL_COLUMNS.map((column) => ({
+    id: column.tag,
+    load: async () => {
+      const cookie = await portalCookies
+      if (!cookie?.trim()) throw noticeAuthError()
+      const pageUrl = (page: number) => PORTAL_ORIGIN + '/portal-api/v3/cms/content/getColumncontents?' +
+        new URLSearchParams({
+          kw: '', columnId: column.id, pageNo: String(page), pageSize: '20',
+          loadContent: 'false', loadPicContents: 'true', sf_request_type: 'ajax'
+        })
+      return paginate(column.tag, pageUrl(1), async (url) => {
+        const response = await http.get(url, {
+          headers: { Cookie: cookie, Referer: PORTAL_URL, Accept: 'application/json' }, timeoutMs: 8000
+        })
+        if (isAuthResponse(response) || /^\s*</.test(response.data)) throw noticeAuthError()
+        if (!isOkResponse(response)) throw new Error('Portal request failed')
+        const raw = JSON.parse(response.data)
+        const data = raw?.data
+        if ([raw?.code, raw?.status].some((code) => [302, 401].includes(Number(code))) ||
+            /请先登录|未登录|登录已过期/.test(String(raw?.message ?? raw?.msg ?? ''))) throw noticeAuthError()
+        if (!Array.isArray(data?.allContents)) throw new Error('Unexpected portal list')
+        const items = data.allContents.flatMap((row: any) => {
+          const title = htmlSpace(String(row?.title ?? ''))
+          if (!title) return []
+          return [{
+            source: column.tag, sourceName: column.name, id: String(row.id ?? ''),
+            title, date: noticeDate(String(row.releaseStartTime || row.createTime || '')),
+            dept: htmlSpace(String(row.releaseDeptName ?? '')),
+            url: asHttpsUrl(row.url, response.url || url)?.href || ''
+          }]
+        })
+        if (data.allContents.length && !items.length) throw new Error('Unexpected portal items')
+        const page = Number(new URL(url).searchParams.get('pageNo'))
+        const hasNext = data.totalPages != null ? page < Number(data.totalPages) : data.allContents.length === 20
+        return { items, nextPageUrl: hasNext ? pageUrl(page + 1) : '' }
+      })
+    }
+  }))
+
+  const loadHtml = (source: string, start: string, timeoutMs: number, college?: CollegeSource, cookie?: string) =>
+    paginate(source, start, async (url) => {
+      const response = await http.get(url, { timeoutMs, headers: cookie ? { Cookie: cookie } : undefined })
+      const landed = response.url || url
+      if (isAuthResponse(response)) throw noticeAuthError()
+      if (!isOkResponse(response) || safeDomain(landed) !== safeDomain(start)) throw new Error('Notice list request failed')
+      const page = college ? parseCollegeListHtml(response.data, landed, college) : parseJwcListHtml(response.data, landed)
+      if (page.login) throw noticeAuthError()
+      if (!page.items.length && !page.empty) throw new Error('Unexpected notice list')
+      return page
+    })
+
+  const sources: NoticeSource[] = [
+    ...portalSources,
+    {
+      id: 'jwc',
+      load: async () => {
+        try {
+          return await loadHtml('jwc', JWC_LIST_DIRECT, 5000)
+        } catch (directError) {
+          const cookie = await http.getCookies?.(JWC_LIST).catch(() => '')
+          try {
+            return await loadHtml('jwc', JWC_LIST, 8000, undefined, cookie)
+          } catch (error) {
+            throw directError instanceof WebVpnAuthError ? directError : error
+          }
+        }
+      }
+    },
+    ...getSubscribedCollegeSources(options.collegeIds || []).map((college) => ({
+      id: college.id,
+      load: () => loadHtml(college.id, college.listUrl, 6000, college)
+    }))
+  ]
+  const settled = await Promise.allSettled(sources.map((source) => source.load()))
+  const items: NoticeListItem[] = []
+  const failedSources: string[] = []
+  let portalAuthRequired = false
+  let authRequired = false
+  for (const [i, result] of settled.entries()) {
+    const source = sources[i].id
+    if (result.status === 'fulfilled') {
+      items.push(...result.value)
+      continue
+    }
+    failedSources.push(source)
+    if (result.reason instanceof WebVpnAuthError) {
+      authRequired = true
+      if (source === 'school' || source === 'news') portalAuthRequired = true
+    }
+  }
+  return { fetchedAt: new Date().toISOString(), items: sortAndMatchMirrors(items), portalAuthRequired, authRequired, failedSources }
+}
+
+export async function fetchBodyFast(http: NoticeHttpClient, item: NoticeListItem): Promise<NoticeBody> {
+  const publicCollege = isCollegeSource(item.source)
+  const original = publicCollege ? toDirectUrl(item.url) : toWebVpnUrl(item.url)
+  const sourceUrl = asHttpsUrl(original, original)?.href
+  const networkFailure: NoticeBody = { text: '', failure: 'network', error: '网页加载失败，请检查网络后重试。', sourceUrl }
+  const authFailure: NoticeBody = { text: '', failure: 'auth', error: '请先登录科大 VPN 后查看这条通知。', pageType: 'login', sourceUrl }
+  if (!sourceUrl) return { text: '', failure: 'parse', error: '通知链接不可用。' }
+
+  const attempt = async (url: string, sourceKind: string, mirrored = false): Promise<NoticeBody> => {
+    const viaVpn = isWebVpnHost(safeDomain(url))
+    const referer = item.source === 'jwc' && !mirrored ? (viaVpn ? JWC_LIST : JWC_LIST_DIRECT)
+      : publicCollege ? undefined : PORTAL_URL
+    try {
+      const headers: Record<string, string> = referer ? { Referer: referer } : {}
+      if (viaVpn) {
+        const cookie = await http.getCookies?.(url)
+        if (cookie) headers.Cookie = cookie
+      }
+      const response = await http.get(url, { headers, timeoutMs: viaVpn ? 8000 : 6000 })
+      if (isAuthResponse(response)) return authFailure
+      if (!isOkResponse(response)) return networkFailure
+      const landed = response.url || url
+      const body = parseNoticeBodyHtml(response.data, landed, {
+        expectedTitle: item.title, expectedId: mirrored ? '' : item.id, publicCollege
+      })
+      if (body.pageType === 'login') return authFailure
+      if (body.articleMatch && (!publicCollege || safeDomain(landed) === safeDomain(url))) {
+        return { ...normalizeBodyResources(body, isWebVpnHost(safeDomain(landed))), sourceUrl, sourceKind, mirrored }
+      }
+      return { text: '', failure: 'parse', error: '未能识别正文。可在应用内打开原文查看。', sourceUrl, pageType: body.pageType }
+    } catch {
+      return networkFailure
+    }
+  }
+
+  const viaVpn = isWebVpnHost(safeDomain(sourceUrl))
+  const primary = await attempt(sourceUrl, item.source === 'jwc' ? (viaVpn ? 'jwc-webvpn' : 'jwc-direct') : (viaVpn ? 'webvpn' : 'original'))
+  if (!primary.failure || primary.failure === 'auth' || item.source !== 'jwc') return primary
+  const direct = toDirectUrl(sourceUrl)
+  if (direct !== sourceUrl) {
+    const result = await attempt(direct, 'jwc-direct')
+    if (!result.failure || result.failure === 'auth') return result
+  }
+  const mirror = item.mirrorUrl && toWebVpnUrl(item.mirrorUrl)
+  const mirrorUrl = mirror && asHttpsUrl(mirror, mirror)?.href
+  if (mirrorUrl) {
+    const result = await attempt(mirrorUrl, 'school-mirror', true)
+    if (!result.failure || result.failure === 'auth') return result
+  }
+  return primary
 }
 
 export { fetchList, fetchBody, toWebVpnUrl, toDirectUrl, buildCandidateUrls, PORTAL_URL, JWC_LIST, JWC_LIST_DIRECT }

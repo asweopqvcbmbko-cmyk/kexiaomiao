@@ -4,7 +4,7 @@
  *
  * 组成：
  *   engine  → Java 插件 SchoolBrowser（隐藏 WebView + CookieManager）
- *   http    → CapacitorHttp（充电桩）
+ *   http    → CapacitorHttp（通知、充电桩）
  *   store   → localStorage（业务缓存），Android Keystore（教务凭据）
  *   eams / notices / card → 从桌面端逐行移植的解析模块
  */
@@ -13,6 +13,7 @@ import { browser, engine, overlay } from './engine'
 import { CapacitorHttp, ExceptionCode, registerPlugin } from '@capacitor/core'
 import { retireStudyData } from './retired-study-data'
 import { createAirconElectricityService } from './lib/aircon-electricity'
+import type { NoticeHttpClient } from './lib/notices'
 import {
   authDelay, authPageScript, AuthFlowError, classifyAuthError, classifyAuthRisk,
   driveAuth, failAuth, inspectAuthPage, waitForAuthInput, type AuthBrowser
@@ -29,7 +30,33 @@ import {
   saveNoticeBody,
   upsertNotices
 } from '../notice-db'
-import type { AuthOptions, AuthRequest, AuthResult, CaptchaAnswer, ChaoxingActivitiesResult, ChaoxingDashboard, ChaoxingProgressResult, CourseTable, SchoolLogin, SessionStatus } from '../types'
+import type { AuthOptions, AuthRequest, AuthResult, CaptchaAnswer, ChaoxingActivitiesResult, ChaoxingDashboard, ChaoxingProgressResult, CourseTable, NoticeBody, NoticeItem, SchoolLogin, SessionStatus } from '../types'
+
+// Keep this UA aligned with SchoolBrowserPlugin.UA.
+const NOTICE_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36'
+async function readNoticeCookies(url: string): Promise<string> {
+  const target = new URL(url)
+  if (target.protocol !== 'https:' || !target.hostname.endsWith('.haust.edu.cn')) return ''
+  return (await browser.cookies({ url })).cookies || ''
+}
+
+const noticeHttp: NoticeHttpClient = {
+  getCookies: readNoticeCookies,
+  async get(url, { headers = {}, timeoutMs = 8000 } = {}) {
+    const requestHeaders: Record<string, string> = { ...headers, 'User-Agent': NOTICE_UA }
+    if (!Object.keys(headers).some((name) => name.toLowerCase() === 'cookie')) {
+      const cookie = await readNoticeCookies(url)
+      if (cookie) requestHeaders.Cookie = cookie
+    }
+    const response = await CapacitorHttp.get({
+      url, headers: requestHeaders, connectTimeout: timeoutMs, readTimeout: timeoutMs, disableRedirects: false
+    })
+    return {
+      status: response.status, url: response.url || url,
+      data: typeof response.data === 'string' ? response.data : JSON.stringify(response.data) ?? ''
+    }
+  }
+}
 
 const HOME = 'https://jwgl-haust-edu-cn-s.haust.edu.cn/eams/homeExt.action'
 const EAMS_RE = /jwgl-haust-edu-cn-s\.haust\.edu\.cn\/eams\//
@@ -114,6 +141,7 @@ function keys(): string[] {
 
 /** 清理与当前教务账号绑定的缓存（课表/考试/校园卡/会话/空调认证令牌），保留宿舍空调房间绑定配置 */
 function clearAccountCache() {
+  noticeSessionVersion += 1
   for (const key of ['courses', 'exams', 'card', 'session', 'aircon.jwt']) {
     try {
       localStorage.removeItem(K(key))
@@ -122,6 +150,25 @@ function clearAccountCache() {
 }
 
 const SCHOOL_IDENTITY_KEY = 'haust.school.session-account'
+let noticeSessionVersion = 0
+let schoolSessionChanging = false
+
+async function changeSchoolSession<T>(change: () => Promise<T>): Promise<T> {
+  schoolSessionChanging = true
+  noticeSessionVersion += 1
+  try {
+    return await change()
+  } finally {
+    noticeSessionVersion += 1
+    schoolSessionChanging = false
+  }
+}
+
+function checkNoticeSession(version: number) {
+  if (schoolSessionChanging || version !== noticeSessionVersion) {
+    throw new DOMException('校园会话已切换，请重新加载通知。', 'AbortError')
+  }
+}
 
 const sessionListeners = new Set<(st: SessionStatus) => void>()
 function emitSession(st: SessionStatus) {
@@ -599,6 +646,13 @@ async function recoverSession(): Promise<boolean> {
   return !!st.loggedIn
 }
 
+function recoverNoticeSession(version: number): Promise<boolean> {
+  return single('notices:recover:' + version, () => withEngine(async () => {
+    checkNoticeSession(version)
+    return recoverSession()
+  })).catch(() => false)
+}
+
 const AIRCON_DEVICE_KEY = 'haust.settings.aircon-device-id'
 const AIRCON_FAIL_TS_KEY = 'haust.aircon.tokenFailAt'
 const AIRCON_FAIL_COOLDOWN_MS = 10 * 60 * 1000
@@ -868,7 +922,7 @@ export const androidApi = {
     try {
       options.signal.throwIfAborted()
       return request.platform === 'school'
-        ? { ok: true, platform: 'school', session: await loginSchoolSilently(request, options) }
+        ? { ok: true, platform: 'school', session: await changeSchoolSession(() => loginSchoolSilently(request, options)) }
         : { ok: true, platform: 'chaoxing', dashboard: await loginChaoxingSilently(request, options) }
     } catch (error) {
       const failure = options.signal.aborted
@@ -889,14 +943,14 @@ export const androidApi = {
     'chaoxing.activities', ignoredCourses, { loggedIn: false, courses: [], activities: [], fetchedAt: new Date().toISOString() },
     () => chaoxing.fetchChaoxingActivities(engine, ignoredCourses),
     (result, ignored) => ({
-      ...result, activities: chaoxing.filterByIgnoredCourses(result.activities, ignored, (item) => item.courseName)
+      ...result, activities: chaoxing.filterCachedCourseRows(result.activities, result.courses, ignored)
     })
   ),
   chaoxingProgress: (ignoredCourses: string[] = []): Promise<ChaoxingProgressResult> => cachedChaoxingCourses(
     'chaoxing.progress', ignoredCourses, { loggedIn: false, courses: [], progress: [], fetchedAt: new Date().toISOString() },
     () => chaoxing.fetchChaoxingProgress(engine, ignoredCourses),
     (result, ignored) => ({
-      ...result, progress: chaoxing.filterByIgnoredCourses(result.progress, ignored, (item) => item.courseName)
+      ...result, progress: chaoxing.filterCachedCourseRows(result.progress, result.courses, ignored)
     })
   ),
   chaoxingLogin: () => single('chaoxing-login', () => withEngine(async () => {
@@ -974,7 +1028,7 @@ export const androidApi = {
     }),
 
   login: (options?: SchoolLogin) =>
-    withEngine(async () => {
+    withEngine(() => changeSchoolSession(async () => {
       // 用户主动点击登录时重置熔断标记，允许重新走一次手动/自动登录
       autoLoginTripped = false
       writeLastAutoLoginAt(0)
@@ -987,7 +1041,7 @@ export const androidApi = {
         }
       }
       return statusNow(true, undefined, options, options?.remember)
-    }),
+    })),
 
   refreshCourses: () =>
     single('courses', () =>
@@ -1044,93 +1098,99 @@ export const androidApi = {
       })
     ),
 
-  refreshNotices: () =>
-    single('notices', () =>
-      withEngine(async () => {
-        const existingKeys = await getAllNoticeKeys().catch(() => new Set<string>())
-        const collegeIds = readSubscribedColleges()
-        const run = () => notices.fetchList(engine, { existingKeys, collegeIds })
-        try {
-          let data = await run()
-          if (data?.authRequired || data?.portalAuthRequired) {
-            if (await recoverSession()) {
-              data = await run().catch(() => data)
-            }
-          }
-          const fetchedItems = Array.isArray(data?.items) ? data.items : []
-          log('notices', fetchedItems.length, 'existing:', existingKeys.size)
-          if (fetchedItems.length > 0) {
-            const merged = await upsertNotices(fetchedItems)
-            const authRequired = !!(data?.authRequired || data?.portalAuthRequired)
-            write('notices', { fetchedAt: data.fetchedAt, items: merged.slice(0, 60) })
-            return { fetchedAt: data.fetchedAt, items: merged, stale: false, authRequired }
-          }
-          const persisted = await getAllNotices()
-          if (persisted.length > 0) {
-            return {
-              fetchedAt: data?.fetchedAt || new Date().toISOString(),
-              items: persisted,
-              stale: true,
-              authRequired: !!(data?.authRequired || data?.portalAuthRequired)
-            }
-          }
-          const cached = read<any>('notices')
-          return cached ? { ...cached, stale: true, authRequired: !!data?.authRequired } : data
-        } catch (e: any) {
-          const isAuth = e instanceof WebVpnAuthError || e?.code === 'WEBVPN_AUTH_REQUIRED'
-          log('notices FAIL', isAuth ? 'WebVpnAuthError' : (e && e.message))
-          if (isAuth && (await recoverSession())) {
-            try {
-              const again = await run()
-              const retryItems = Array.isArray(again?.items) ? again.items : []
-              if (retryItems.length > 0) {
-                const merged = await upsertNotices(retryItems)
-                const authRequired = !!(again?.authRequired || again?.portalAuthRequired)
-                write('notices', { fetchedAt: again.fetchedAt, items: merged.slice(0, 60) })
-                return { fetchedAt: again.fetchedAt, items: merged, stale: false, authRequired }
-              }
-            } catch (_) {}
-          }
-          const persisted = await getAllNotices()
-          if (persisted.length > 0) {
-            return {
-              fetchedAt: new Date().toISOString(),
-              items: persisted,
-              stale: true,
-              authRequired: isAuth,
-              error: String(e && e.message)
-            }
-          }
-          const cached = read<any>('notices')
-          if (cached) {
-            return { ...cached, stale: true, authRequired: isAuth, error: String(e && e.message) }
-          }
-          if (isAuth) {
-            return { fetchedAt: new Date().toISOString(), items: [], stale: true, authRequired: true, error: e.message }
-          }
-          throw e
-        }
-      })
-    ),
-
-  noticeBody: async (item: any) => {
-    // 正文懒加载优先读 IndexedDB 本地缓存，命中即毫秒离线直读，不占隐藏 WebView 锁
-    const cachedBody = await getCachedNoticeBody(item).catch(() => null)
-    if (cachedBody) return cachedBody
-    return withEngine(async () => {
+  refreshNotices: () => {
+    const version = noticeSessionVersion
+    return single('notices:' + version, async () => {
+      checkNoticeSession(version)
+      const existingKeys = await getAllNoticeKeys().catch(() => new Set<string>())
+      const collegeIds = readSubscribedColleges()
+      const options = { existingKeys, collegeIds }
+      const allFailed = (result: Awaited<ReturnType<typeof notices.fetchListFast>>) =>
+        result.failedSources.length === 3 + collegeIds.length
+      const runFast = () => {
+        checkNoticeSession(version)
+        return notices.fetchListFast(noticeHttp, options)
+      }
       try {
-        let res = await notices.fetchBody(engine, item)
-        if (res?.failure === 'auth' && (await recoverSession())) {
-          res = await notices.fetchBody(engine, item).catch(() => res)
+        let data = await runFast()
+        if (data.authRequired || data.portalAuthRequired) {
+          if (await recoverNoticeSession(version)) {
+            const retry = await runFast()
+            const items = new Map([...data.items, ...retry.items].map((item) => [item.source + ':' + item.id, item]))
+            data = {
+              ...retry, items: notices.sortAndMatchMirrors([...items.values()]),
+              failedSources: retry.failedSources.filter((source) => data.failedSources.includes(source))
+            }
+          }
+        } else if (allFailed(data)) {
+          try {
+            data = await withEngine(() => {
+              checkNoticeSession(version)
+              return notices.fetchList(engine, options)
+            })
+          } catch (error) {
+            if (!(error instanceof WebVpnAuthError) || !(await recoverNoticeSession(version))) throw error
+            data = await runFast()
+            if (allFailed(data)) throw error
+          }
         }
-        if (res && !res.failure) {
-          await saveNoticeBody(item, res).catch(() => {})
+        checkNoticeSession(version)
+        const authRequired = data.authRequired || data.portalAuthRequired
+        if (data.items.length) {
+          const items = await upsertNotices(data.items)
+          checkNoticeSession(version)
+          write('notices', { fetchedAt: data.fetchedAt, items: items.slice(0, 60) })
+          return { ...data, items, stale: false, authRequired }
         }
-        return res
-      } catch (e: any) {
-        return { text: '', failure: 'network', error: String(e && e.message) }
+        const persisted = await getAllNotices()
+        checkNoticeSession(version)
+        const cached = read<{ items: NoticeItem[] }>('notices')
+        return {
+          ...data, items: persisted.length ? persisted : cached?.items || [],
+          stale: data.failedSources.length > 0 || authRequired, authRequired
+        }
+      } catch (error) {
+        checkNoticeSession(version)
+        const authRequired = error instanceof WebVpnAuthError
+        const persisted = await getAllNotices()
+        checkNoticeSession(version)
+        const cached = read<{ fetchedAt: string; items: NoticeItem[] }>('notices')
+        if (!persisted.length && !cached && !authRequired) throw error
+        return {
+          fetchedAt: cached?.fetchedAt || new Date().toISOString(),
+          items: persisted.length ? persisted : cached?.items || [],
+          stale: true, authRequired, error: error instanceof Error ? error.message : String(error)
+        }
       }
     })
+  },
+
+  noticeBody: async (item: NoticeItem & { mirrorUrl?: string }): Promise<NoticeBody> => {
+    const version = noticeSessionVersion
+    const cachedBody = await getCachedNoticeBody(item).catch(() => null)
+    checkNoticeSession(version)
+    if (cachedBody) return cachedBody
+    let body = await notices.fetchBodyFast(noticeHttp, item)
+    checkNoticeSession(version)
+    if (body.failure === 'auth' && await recoverNoticeSession(version)) {
+      checkNoticeSession(version)
+      body = await notices.fetchBodyFast(noticeHttp, item)
+    }
+    if (body.failure) {
+      try {
+        body = await withEngine(() => {
+          checkNoticeSession(version)
+          return notices.fetchBody(engine, item)
+        })
+      } catch (error) {
+        checkNoticeSession(version)
+        return { text: '', failure: 'network', error: error instanceof Error ? error.message : String(error) }
+      }
+    }
+    checkNoticeSession(version)
+    if (!body.failure) await saveNoticeBody(item, body).catch(() => {})
+    checkNoticeSession(version)
+    return body
   },
 
   refreshCard: () =>
@@ -1204,7 +1264,7 @@ export const androidApi = {
     })
     return true
   },
-  clearCred: () => withEngine(async () => {
+  clearCred: () => withEngine(() => changeSchoolSession(async () => {
     chaoxingCacheVersion += 1
     const results = await Promise.allSettled([
       clearSavedCred(),
@@ -1222,7 +1282,7 @@ export const androidApi = {
     chaoxingAutoLoginTripped = results[1].status === 'rejected'
     emitSession({ loggedIn: false, verified: true, checkedAt: new Date().toISOString() })
     return results.every((result) => result.status === 'fulfilled' && result.value !== false)
-  }),
+  })),
 
   /* 教务凭据：保存后登录时自动填（学校登录链要过两道 CAS） */
   credStatus: () => withEngine(async () => {

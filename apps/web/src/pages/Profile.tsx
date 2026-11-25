@@ -2,6 +2,13 @@ import { Icon } from '../icons'
 import { PageHeader } from '../components/ui'
 import type { Theme } from '../theme'
 import type { SessionStatus } from '../types'
+import './profile-system.css'
+
+const themeChoices = {
+  light: { icon: 'sun', label: '浅色', status: '浅色模式' },
+  dark: { icon: 'moon', label: '深色', status: '深色模式' },
+  system: { icon: 'monitor', label: '跟随系统', status: '跟随系统' }
+} satisfies Record<Theme, { icon: string; label: string; status: string }>
 
 export function Profile(props: {
   status: SessionStatus | null
@@ -25,28 +32,49 @@ export function Profile(props: {
   onReplayOnboarding: () => void
 }) {
   const loggedIn = !!props.status?.loggedIn && !props.demoMode
+  const studentName = loggedIn ? props.status?.studentName : undefined
+  const versionName = props.appVersionName || '0.1.10'
+  const week = `第 ${props.week} 教学周`
+  const identity = loggedIn
+    ? [studentName, '已登录', week].filter(Boolean).join(' · ')
+    : props.demoMode
+      ? `演示模式 · ${week}`
+      : `未登录 · 点下方登录教务 · ${week}`
+  const theme = themeChoices[props.theme]
 
-  const rows: Array<{ icon: string; name: string; sub: string; onClick: () => void }> = [
-    {
-      icon: 'sync',
-      name: '数据同步',
-      sub: props.demoMode
-        ? '演示模式（登录校园账号后同步实时数据）'
-        : props.lastSync
-          ? `上次刷新 ${props.lastSync}`
-          : '点右侧刷新拉取最新数据',
-      onClick: props.onRefresh
-    },
+  const tiles = [
     {
       icon: 'user',
       name: '教务账号',
-      sub: loggedIn
-        ? `已登录${props.status?.studentName ? ' · ' + props.status.studentName : ''}`
-        : props.demoMode
-          ? '当前为演示模式 · 点此登录真实账号'
-          : '未登录 · 点此登录',
+      value: loggedIn ? (studentName ? `已登录 · ${studentName}` : '已登录') : props.demoMode ? '演示模式' : '未登录',
+      dot: loggedIn,
       onClick: props.onLogin
     },
+    {
+      icon: 'sync',
+      name: '数据同步',
+      value: props.refreshing ? '正在同步…' : props.lastSync ? `上次刷新 ${props.lastSync}` : '点击立即同步',
+      spinning: props.refreshing,
+      onClick: props.onRefresh
+    },
+    {
+      icon: theme.icon,
+      name: '外观主题',
+      value: theme.status,
+      opensDialog: true,
+      onClick: props.onOpenTheme
+    },
+    {
+      icon: 'refresh',
+      name: '云端更新',
+      value: props.hasUpdate ? '发现新版本' : `v${versionName} · 检查更新`,
+      highlighted: props.hasUpdate,
+      opensDialog: true,
+      onClick: props.onOpenUpdateSettings
+    }
+  ]
+
+  const rows = [
     {
       icon: 'storage',
       name: '缓存管理',
@@ -60,17 +88,9 @@ export function Profile(props: {
       onClick: props.onReplayOnboarding
     },
     {
-      icon: 'sync',
-      name: '自动更新设置',
-      sub: props.hasUpdate
-        ? '发现新版本 · 点此查看并下载更新'
-        : `当前 v${props.appVersionName || '0.1.10'} · 云端检查与 Beta 渠道`,
-      onClick: props.onOpenUpdateSettings
-    },
-    {
       icon: 'info',
       name: '关于科小喵',
-      sub: '校园助手 · 界面改版',
+      sub: '校园助手 · 开放源代码与版本信息',
       onClick: props.onOpenAbout
     }
   ]
@@ -94,64 +114,109 @@ export function Profile(props: {
         </div>
       ) : null}
 
-      <div className="card profile">
-        <div className="cat">
-          <Icon name="cat" />
-        </div>
-        <div>
-          <h2>
-            {props.status?.studentName || '校园助手'}{' '}
-            <span className="pill">{loggedIn ? '已登录' : '去登录'}</span>
-          </h2>
-          <small>
-            第 {props.week} 教学周
-            {props.term ? ` · ${props.term}` : ''}
-          </small>
-        </div>
-      </div>
-
-      <div className="card settings">
-        {rows.map((r) => (
-          <button className="setting" key={r.name} onClick={r.onClick}>
-            <Icon name={r.icon} />
-            <span className="setting-copy">
-              <b>{r.name}</b>
-              <small>{r.sub}</small>
+      <div className="profile-system">
+        <div className={`profile-system-hero-frame${props.hasUpdate ? ' has-update' : ''}`}>
+          <button type="button" className="profile-system-hero" aria-haspopup="dialog" onClick={props.onOpenUpdateSettings}>
+            <span className="profile-system-hero-top">
+              <span className="profile-system-hero-brand">
+                <span className="profile-system-cat"><Icon name="cat" /></span>
+                <span className="profile-system-brand-copy">
+                  <b>科小喵</b>
+                  <span className="profile-system-channel">{/beta/i.test(versionName) ? 'Beta' : '正式版'}</span>
+                </span>
+              </span>
+              <span className="profile-system-update-badge">
+                {props.hasUpdate ? <span className="profile-system-update-dot" aria-hidden="true" /> : null}
+                {props.hasUpdate ? '发现新版本' : '检查更新'}
+                {!props.hasUpdate ? <Icon name="arrow" /> : null}
+              </span>
             </span>
-            <Icon name="arrow" className="arrow" />
+            <span className="profile-system-hero-main">
+              <span className="profile-system-version"><span>v</span>{versionName}</span>
+              <span className="profile-system-identity">{identity}</span>
+            </span>
+            <span className="profile-system-hero-bottom">
+              {props.term ? <span>{props.term}</span> : null}
+              <span className="profile-system-hero-link">云端更新与版本通道 <Icon name="arrow" /></span>
+            </span>
           </button>
-        ))}
-        <button className="setting danger" onClick={props.onClearCred}>
-          <Icon name="close" />
-          <span className="setting-copy">
-            <b>清除登录凭据</b>
-            <small>清除凭据、会话与账号缓存，下次需重新登录</small>
-          </span>
-          <Icon name="arrow" className="arrow" />
-        </button>
-      </div>
+        </div>
 
-      <div className="sectionhead">
-        <h2>外观</h2>
-      </div>
-      <div className="themechoices">
-        {(
-          [
-            ['light', 'sun', '浅色'],
-            ['dark', 'moon', '深色'],
-            ['system', 'monitor', '跟随系统']
-          ] as Array<[Theme, string, string]>
-        ).map(([v, i, n]) => (
-          <button
-            key={v}
-            className={`themechoice${props.theme === v ? ' selected' : ''}`}
-            onClick={() => props.onChangeTheme(v)}
-            data-theme-choice={v}
-          >
-            <Icon name={i} />
-            {n}
-          </button>
-        ))}
+        <div className="profile-system-grid" role="group" aria-label="快捷设置">
+          {tiles.map((tile) => (
+            <button
+              type="button"
+              className="profile-system-tile"
+              key={tile.name}
+              aria-busy={tile.spinning}
+              aria-haspopup={tile.opensDialog ? 'dialog' : undefined}
+              onClick={tile.onClick}
+            >
+              <span className="profile-system-tile-top">
+                <span className="profile-system-icon">
+                  <Icon name={tile.icon} className={tile.spinning ? 'profile-system-spinning' : undefined} />
+                </span>
+                <Icon name="arrow" className="profile-system-chevron" />
+              </span>
+              <span className="profile-system-tile-copy">
+                <b>{tile.name}</b>
+                <span className={`profile-system-tile-status${tile.highlighted ? ' is-highlighted' : ''}`}>
+                  {tile.dot ? <span className="profile-system-login-dot" aria-hidden="true" /> : null}
+                  <span className="profile-system-tile-value" title={tile.value}>{tile.value}</span>
+                </span>
+              </span>
+            </button>
+          ))}
+        </div>
+
+        <section className="profile-system-section">
+          <h2 id="profile-system-appearance">外观</h2>
+          <div className="profile-system-themes" role="group" aria-labelledby="profile-system-appearance">
+            {(['light', 'dark', 'system'] as const).map((v) => (
+              <button
+                type="button"
+                className="themechoice"
+                key={v}
+                aria-pressed={props.theme === v}
+                onClick={() => props.onChangeTheme(v)}
+                data-theme-choice={v}
+              >
+                <Icon name={themeChoices[v].icon} />
+                {themeChoices[v].label}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="profile-system-section">
+          <h2>常规与数据</h2>
+          <div className="profile-system-group">
+            {rows.map((row) => (
+              <button type="button" className="profile-system-row" key={row.name} onClick={row.onClick}>
+                <span className="profile-system-icon"><Icon name={row.icon} /></span>
+                <span className="profile-system-row-copy">
+                  <b>{row.name}</b>
+                  <small>{row.sub}</small>
+                </span>
+                <Icon name="arrow" className="profile-system-chevron" />
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="profile-system-section">
+          <h2>账号安全</h2>
+          <div className="profile-system-group profile-system-danger">
+            <button type="button" className="profile-system-row" onClick={props.onClearCred}>
+              <span className="profile-system-icon"><Icon name="warning" /></span>
+              <span className="profile-system-row-copy">
+                <b>清除登录凭据</b>
+                <small>清除凭据、会话与账号缓存，下次需重新登录</small>
+              </span>
+              <Icon name="arrow" className="profile-system-chevron" />
+            </button>
+          </div>
+        </section>
       </div>
 
       <p className="footer-note">科小喵 · 让每一天，井然有序。</p>

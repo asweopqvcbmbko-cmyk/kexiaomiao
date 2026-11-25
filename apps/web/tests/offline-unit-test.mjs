@@ -3,7 +3,12 @@ import vm from 'node:vm'
 import { fetchCard } from '../src/android/lib/card.ts'
 import {
   fetchList,
+  fetchListFast,
   fetchBody,
+  fetchBodyFast,
+  parseJwcListHtml,
+  parseCollegeListHtml,
+  parseNoticeBodyHtml,
   toWebVpnUrl,
   toDirectUrl,
   buildCandidateUrls
@@ -863,6 +868,139 @@ async function runTests() {
     if (storageDescriptor) Object.defineProperty(globalThis, 'localStorage', storageDescriptor)
     else delete globalThis.localStorage
   }
+
+  // 31. notices.ts: 纯 HTML 列表/正文解析
+  const jwcParsed = parseJwcListHtml(
+    '<ul><li><a href="info/1001/901.htm?wbnewsid=901" title="关于2026年期末考试安排">关于2026年期末考试安排</a><span>2026年11月24日</span></li></ul><a href="tzgg/2.htm">下页</a>',
+    'https://jwc.haust.edu.cn/tzgg.htm'
+  )
+  assert.equal(jwcParsed.items.length, 1)
+  assert.equal(jwcParsed.items[0].id, '901')
+  assert.equal(jwcParsed.items[0].date, '2026-11-24')
+  assert.equal(jwcParsed.nextPageUrl, 'https://jwc.haust.edu.cn/tzgg/2.htm')
+
+  const firstCollege = COLLEGES[0]
+  const secondCollege = COLLEGES[1]
+  const colParsed = parseCollegeListHtml(
+    `<ul><li><a href="http://${firstCollege.host}/info/1045/7777.htm">学院学术报告通知</a><span>2026-11-25</span></li></ul>`,
+    firstCollege.listUrl,
+    firstCollege
+  )
+  assert.equal(colParsed.items.length, 1)
+  assert.equal(colParsed.items[0].url, `https://${firstCollege.host}/info/1045/7777.htm`)
+  assert.equal(colParsed.items[0].date, '2026-11-25')
+
+  const bodyParsed = parseNoticeBodyHtml(
+    '<html><head><title>学院学术报告通知</title></head><body><div id="vsb_content"><h1>学院学术报告通知</h1><p>时间：2026年11月25日下午</p><img src="/_upload/pic.png" /><a href="/_upload/file.pdf">报告日程.pdf</a></div></body></html>',
+    `https://${firstCollege.host}/info/1045/7777.htm`,
+    { expectedTitle: '学院学术报告通知', expectedId: '7777', publicCollege: true }
+  )
+  assert.equal(bodyParsed.pageType, 'article')
+  assert.equal(bodyParsed.articleMatch, true)
+  assert.ok(bodyParsed.text.includes('2026年11月25日下午'))
+  assert.equal(bodyParsed.imgs[0], `https://${firstCollege.host}/_upload/pic.png`)
+  assert.equal(bodyParsed.attachments[0].url, `https://${firstCollege.host}/_upload/file.pdf`)
+
+  const loginParsed = parseNoticeBodyHtml(
+    '<html><body><h1>统一身份认证</h1><form><input type="password" /></form></body></html>',
+    'https://cas.haust.edu.cn/cas/login',
+    { expectedTitle: '通知', expectedId: '1', publicCollege: false }
+  )
+  assert.equal(loginParsed.pageType, 'login')
+
+  // 32. notices.ts: fetchListFast 多源并发、故障隔离与无 Cookie 认证判定
+  const fastRes = await fetchListFast(
+    {
+      getCookies: async () => 'wengine_vpn_ticket=OK',
+      get: async (url) => {
+        if (url.includes('remote-1120073')) {
+          return {
+            status: 200,
+            url,
+            data: JSON.stringify({
+              data: {
+                totalPages: 1,
+                allContents: [{ id: '101', title: '全校大会通知', releaseStartTime: '2026-11-25', releaseDeptName: '党政办', url: 'https://www.haust.edu.cn/info/1/101.htm' }]
+              }
+            })
+          }
+        }
+        if (url.includes('remote-1120074')) {
+          return { status: 200, url, data: JSON.stringify({ data: { totalPages: 1, allContents: [] } }) }
+        }
+        if (url.includes('jwc.haust.edu.cn')) {
+          return {
+            status: 200,
+            url,
+            data: '<ul><li><a href="info/1001/202.htm?wbnewsid=202">全校大会通知</a><span>2026年11月25日</span></li></ul>'
+          }
+        }
+        if (url.includes(firstCollege.host)) {
+          return {
+            status: 200,
+            url,
+            data: '<ul><li><a href="/info/1045/303.htm">学院同步测试通知</a><span>2026-11-24</span></li></ul>'
+          }
+        }
+        throw new Error('timeout')
+      }
+    },
+    { collegeIds: [firstCollege.id, secondCollege.id], maxInitialPages: 1 }
+  )
+  assert.equal(fastRes.portalAuthRequired, false)
+  assert.ok(fastRes.items.some((x) => x.source === 'school' && x.title === '全校大会通知'))
+  assert.ok(fastRes.items.some((x) => x.source === 'jwc' && x.mirrorUrl === 'https://www.haust.edu.cn/info/1/101.htm'))
+  assert.ok(fastRes.items.some((x) => x.source === firstCollege.id && x.title === '学院同步测试通知'))
+  assert.ok(fastRes.failedSources.includes(secondCollege.id))
+
+  const fastNoCookie = await fetchListFast(
+    {
+      getCookies: async () => '',
+      get: async (url) => ({
+        status: 200,
+        url,
+        data: '<ul><li><a href="info/1001/202.htm?wbnewsid=202">教务直连通知</a><span>2026年11月25日</span></li></ul>'
+      })
+    },
+    { collegeIds: [], maxInitialPages: 1 }
+  )
+  assert.equal(fastNoCookie.portalAuthRequired, true)
+  assert.equal(fastNoCookie.items.length, 1)
+
+  // 33. notices.ts: fetchBodyFast 正文极速提取与登录拦截
+  const fastBodyOk = await fetchBodyFast(
+    {
+      get: async (url) => ({
+        status: 200,
+        url,
+        data: '<html><body><div id="vsb_content"><h1>学院同步测试通知</h1><p>这是极速 HTTP 正文</p></div></body></html>'
+      })
+    },
+    { source: firstCollege.id, sourceName: firstCollege.shortName, id: '303', title: '学院同步测试通知', date: '2026-11-24', dept: firstCollege.fullName, url: `https://${firstCollege.host}/info/1045/303.htm` }
+  )
+  assert.equal(fastBodyOk.failure, undefined)
+  assert.ok(fastBodyOk.text.includes('这是极速 HTTP 正文'))
+
+  const fastBodyAuth = await fetchBodyFast(
+    {
+      getCookies: async () => '',
+      get: async () => ({ status: 302, url: 'https://cas.haust.edu.cn/cas/login', data: '' })
+    },
+    { source: 'school', sourceName: '全校通知', id: '101', title: '全校大会通知', date: '2026-11-25', dept: '党政办', url: 'https://www.haust.edu.cn/info/1/101.htm' }
+  )
+  assert.equal(fastBodyAuth.failure, 'auth')
+
+  // 34. chaoxing.ts: 忽略课程同时匹配全称、去书名号与旧版截断前缀
+  const filteredCourses = filterByIgnoredCourses(
+    [
+      { courseName: '工程图学2026-2027-1' },
+      { courseName: '高等数学A(一)' },
+      { courseName: '大学物理(下)' }
+    ],
+    ['《工程图学20...》', '《高等数学A(一)》'],
+    (c) => c.courseName
+  )
+  assert.deepEqual(filteredCourses.map((c) => c.courseName), ['大学物理(下)'])
 
   console.log('ALL OFFLINE UNIT TESTS PASSED')
 }

@@ -27,16 +27,46 @@ export function mergeChaoxingExams(primary: ChaoxingExam[], secondary: ChaoxingE
   return [...unique.values()]
 }
 
-export function filterByIgnoredCourses<T>(items: T[], ignoredCourses: string[], getCourse: (item: T) => string): T[] {
-  const ignored = new Set(ignoredCourses.map((name) => name.trim().toLowerCase()).filter(Boolean))
-  return items.filter((item) => !ignored.has(getCourse(item).trim().toLowerCase()))
+const normalizeCourseName = (name = '') => name.normalize('NFKC').replace(/[《》〈〉]/g, '')
+  .replace(/\s+/g, ' ').trim().toLowerCase()
+const courseNamePrefix = (name: string) => name.replace(/\.{3,}$/, '').trim()
+
+export function filterByIgnoredCourses<T>(
+  items: T[], ignoredCourses: string[], getCourse: (item: T) => string | (string | undefined)[]
+): T[] {
+  const ignored = ignoredCourses.map(normalizeCourseName).filter(Boolean)
+  return items.filter((item) => {
+    const names = getCourse(item)
+    return ![names].flat().map(normalizeCourseName).filter(Boolean).some((name) => {
+      const prefix = courseNamePrefix(name)
+      return ignored.some((entry) => {
+        if (entry === name) return true
+        const ignoredPrefix = courseNamePrefix(entry)
+        return (ignoredPrefix && ignoredPrefix !== entry && name.startsWith(ignoredPrefix)) ||
+          (prefix && prefix !== name && entry.startsWith(prefix))
+      })
+    })
+  })
 }
 
 const field = (value: unknown): string =>
   typeof value === 'string' || typeof value === 'number' ? String(value).trim() : ''
 
-export function parseCourseListJson(raw: any): ChaoxingCourse[] {
-  const courses = new Map<string, ChaoxingCourse>()
+type CourseNames = Pick<ChaoxingCourse, 'courseName'> & { fullCourseName?: string }
+const getCourseNames = (course: CourseNames) => [course.courseName, course.fullCourseName]
+
+export function filterCachedCourseRows<T extends Pick<ChaoxingCourse, 'courseId' | 'clazzId' | 'courseName'>>(
+  rows: T[], courses: ChaoxingCourse[], ignoredCourses: string[]
+): T[] {
+  const aliases = new Map(courses.map((course: ChaoxingCourse & CourseNames) => [
+    course.courseId + '_' + course.clazzId, getCourseNames(course)
+  ]))
+  return filterByIgnoredCourses(rows, ignoredCourses,
+    (row) => [row.courseName, ...(aliases.get(row.courseId + '_' + row.clazzId) || [])])
+}
+
+export function parseCourseListJson(raw: any): (ChaoxingCourse & CourseNames)[] {
+  const courses = new Map<string, ChaoxingCourse & CourseNames>()
   if (!Array.isArray(raw?.channelList)) return []
   for (const channel of raw.channelList) {
     if (channel?.cataid !== '100000002') continue
@@ -47,11 +77,15 @@ export function parseCourseListJson(raw: any): ChaoxingCourse[] {
     const clazzId = field(clazz?.id ?? content.clazzId ?? content.id ?? channel.key)
     for (const item of list) {
       const courseId = field(item?.id ?? item?.courseId)
-      const courseName = field(item?.name ?? item?.courseName)
+      const alternateName = field(item?.courseName)
+      const fullCourseName = field(item?.fullCourseName)
+      const courseName = field(item?.name) || alternateName || fullCourseName
       if (!courseId || !clazzId || !courseName) continue
       const key = courseId + '_' + clazzId
+      const alias = [fullCourseName, alternateName].find((name) => name && name !== courseName)
       if (!courses.has(key)) courses.set(key, {
         courseId, clazzId, courseName,
+        ...(alias ? { fullCourseName: alias } : {}),
         cpi: field(content.cpi ?? clazz?.cpi ?? item.cpi),
         teacherName: field(item.teacherfactor ?? item.teacherName),
         enc: field(content.enc ?? clazz?.enc ?? item.enc) || undefined,
@@ -393,7 +427,7 @@ async function fetchCourseJson(engine: Engine, url: string): Promise<any> {
   throw new Error('Chaoxing course request timed out')
 }
 
-export async function fetchChaoxingCourses(engine: Engine): Promise<ChaoxingCourse[]> {
+export async function fetchChaoxingCourses(engine: Engine): Promise<(ChaoxingCourse & CourseNames)[]> {
   await loadCoursePage(engine, CHAOXING_WORK_URL)
   const raw = await fetchCourseJson(engine, ORIGIN + '/mycourse/backclazzdata?view=json&mcode=')
   const courses = parseCourseListJson(raw)
@@ -414,7 +448,7 @@ const activityTypes: Record<string, string> = {
 
 export async function fetchChaoxingActivities(engine: Engine, ignoredCourses: string[] = [], delayMs = 500): Promise<ChaoxingActivitiesResult> {
   const courses = await fetchChaoxingCourses(engine)
-  const selected = filterByIgnoredCourses(courses, ignoredCourses, (course) => course.courseName)
+  const selected = filterByIgnoredCourses(courses, ignoredCourses, getCourseNames)
   const activities: ChaoxingActivity[] = []
   if (selected.length) await loadCoursePage(engine, MOBILE_ORIGIN + '/')
   for (const [index, course] of selected.entries()) {
@@ -468,7 +502,7 @@ const READ_PROGRESS_JS = String.raw`(() => {
 
 export async function fetchChaoxingProgress(engine: Engine, ignoredCourses: string[] = [], delayMs = 500): Promise<ChaoxingProgressResult> {
   const courses = await fetchChaoxingCourses(engine)
-  const selected = filterByIgnoredCourses(courses, ignoredCourses, (course) => course.courseName)
+  const selected = filterByIgnoredCourses(courses, ignoredCourses, getCourseNames)
   const progress: ChaoxingProgressResult['progress'] = []
   for (const [index, course] of selected.entries()) {
     if (index > 0) await sleep(delayMs)
