@@ -169,7 +169,16 @@ function buildCollegeListJs(college: CollegeSource) {
   };
   const out = [];
   const seen = new Set();
+  const isNavChrome = (el) => {
+    for (let node = el; node && node.tagName && !/^(BODY|HTML)$/.test(node.tagName); node = node.parentElement) {
+      if (/^(HEADER|NAV|FOOTER|ASIDE)$/.test(node.tagName)) return true;
+      const sig = ((node.id || '') + ' ' + (typeof node.className === 'string' ? node.className : '')).toLowerCase();
+      if (/(?:^|[\s_-])(?:header|nav|navbar|subnav|menu|menubar|dropdown|footer|topbar|banner|breadcrumb)(?:[\s_-]|\d|$)/.test(sig)) return true;
+    }
+    return false;
+  };
   document.querySelectorAll('a[href]').forEach((a) => {
+    if (isNavChrome(a)) return;
     const href = a.getAttribute('href') || '';
     const title = (a.title?.trim() || a.textContent || '').replace(/\s+/g, ' ').trim();
     if (title.length < 4) return;
@@ -657,6 +666,15 @@ function readListDate(link: HtmlNode, allowShort: boolean) {
   return shortDate
 }
 
+const LIST_CHROME_RE = /(?:^|[\s_-])(?:header|nav|navbar|subnav|menu|menubar|dropdown|footer|topbar|banner|breadcrumb)(?:[\s_-]|\d|$)/i
+function isInsideListChrome(node: HtmlNode): boolean {
+  for (let cur: HtmlNode | undefined = node; cur && cur.tag !== 'body' && cur.tag !== 'html' && cur.tag !== '#document'; cur = cur.parent) {
+    if (/^(?:header|nav|footer|aside)$/.test(cur.tag)) return true
+    if (LIST_CHROME_RE.test([cur.attrs.id, cur.attrs.class].join(' '))) return true
+  }
+  return false
+}
+
 function parseVsbList(html: string, baseUrl: string, college?: CollegeSource) {
   const root = parseHtml(html)
   const items = new Map<string, NoticeListItem>()
@@ -671,9 +689,10 @@ function parseVsbList(html: string, baseUrl: string, college?: CollegeSource) {
         (/^(下\s*页|下一页)$/.test(label || link.attrs.title) || link.attrs.rel === 'next')) {
       nextPageUrl = url.href
     }
+    if (isInsideListChrome(link)) continue
     const id = articleId(url, !!college)
     const title = htmlSpace(link.attrs.title) || label
-    if (!id || !title || items.has(id)) continue
+    if (!id || title.length < 4 || items.has(id)) continue
     items.set(id, {
       source: college?.id ?? 'jwc', sourceName: college?.shortName ?? '教务处',
       id, title, date: readListDate(link, !!college), dept: college?.fullName ?? '教务处', url: url.href

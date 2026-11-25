@@ -1205,8 +1205,8 @@ async function runTests() {
     'https://jd-haust-edu-cn-s.haust.edu.cn/info/1001/901.htm'
   ])
 
-  // 43. Notice schema v3 clears both stores on upgrade without changing read state.
-  assert.equal(NOTICE_DB_VERSION, 3)
+  // 43. Notice schema v4 clears both stores on upgrade without changing read state.
+  assert.equal(NOTICE_DB_VERSION, 4)
   const stores = new Map([
     ['notices', new Map([['cl:1204_21939', { title: 'Legacy metadata' }]])],
     ['bodies', new Map([['cl:1204_21939', { text: 'Legacy body' }]])]
@@ -1223,7 +1223,7 @@ async function runTests() {
     indexedDB: {
       open(name, version) {
         assert.equal(name, NOTICE_DB_NAME)
-        assert.equal(version, 3)
+        assert.equal(version, 4)
         const request = {
           result: {
             objectStoreNames: { contains: (name) => stores.has(name) },
@@ -1240,7 +1240,7 @@ async function runTests() {
           transaction: { objectStore: (name) => stores.get(name) }
         }
         queueMicrotask(() => {
-          request.onupgradeneeded({ oldVersion: 2 })
+          request.onupgradeneeded({ oldVersion: 3 })
           request.onsuccess()
         })
         return request
@@ -1281,6 +1281,19 @@ async function runTests() {
   assert.deepEqual(rows.map(({ key, cachedAt, ...metadata }) => metadata), [
     { ...freshNotice, id: '1024_302' }
   ])
+
+  // 45. notices.ts: parseCollegeListHtml 自动跳过导航栏菜单链接（如农学院 #nav 里的学院简介/现任领导）
+  const nxCollege = COLLEGES.find((c) => c.id === 'nx')
+  const nxNavHtml = `
+    <html><body>
+      <div id="nav"><a href="../info/1264/23986.htm">学院简介</a><a href="../content.jsp?wbnewsid=8266">现任领导</a></div>
+      <div id="passage"><ul>
+        <li><a href="../content.jsp?wbtreeid=1096&wbnewsid=31356" title="农学院2026年研究生评优公示">农学院2026年研究生评优公示</a></li>
+      </ul></div>
+    </body></html>
+  `
+  const nxParsed = parseCollegeListHtml(nxNavHtml, 'https://nx.haust.edu.cn/index/tzgg.htm', nxCollege)
+  assert.deepEqual(nxParsed.items.map((x) => x.title), ['农学院2026年研究生评优公示'])
 
   console.log('ALL OFFLINE UNIT TESTS PASSED')
 }

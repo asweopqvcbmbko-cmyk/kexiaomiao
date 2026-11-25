@@ -682,9 +682,9 @@ export function Dashboard(props: {
           <div className="dash-tabs" role="tablist" aria-label="学习通视图切换">
             {(
               [
-                ['todo', `待办 ${todos.length}`],
-                ['works', `作业 ${works.length}`],
-                ['exams', `考试 ${exams.length}`],
+                ['todo', todos.length ? `待办 ${todos.length}` : '待办'],
+                ['works', pendingWorks.length ? `作业 ${pendingWorks.length}` : '作业'],
+                ['exams', activeExams.length ? `考试 ${activeExams.length}` : '考试'],
                 ['activities', '任务'],
                 ['progress', '进度']
               ] as Array<[Section, string]>

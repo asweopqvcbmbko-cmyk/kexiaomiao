@@ -6,7 +6,7 @@
 import type { NoticeBody, NoticeItem } from './types'
 
 export const NOTICE_DB_NAME = 'haust_notices_v1'
-export const NOTICE_DB_VERSION = 3
+export const NOTICE_DB_VERSION = 4
 export const NOTICE_MAX_ITEMS = 300
 const NOTICE_BODY_VERSION = 2
 
@@ -215,7 +215,7 @@ function openNoticeDb(): Promise<IDBDatabase | null> {
         if (!db.objectStoreNames.contains('bodies')) {
           db.createObjectStore('bodies', { keyPath: 'key' })
         }
-        if (event.oldVersion < 3) {
+        if (event.oldVersion < 4) {
           const tx = req.transaction!
           tx.objectStore('bodies').clear()
           tx.objectStore('notices').clear()
