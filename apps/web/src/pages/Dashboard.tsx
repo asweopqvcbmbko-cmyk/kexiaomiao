@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { TouchEvent } from 'react'
 import { Icon } from '../icons'
 import { Empty, Modal, PageHeader } from '../components/ui'
 import { data } from '../api'
 import { buildDemoChaoxingCourses } from '../demoData'
+import { haptic } from '../haptics'
 import { buildChaoxingTodos, filterByIgnoredCourses, parseLeftTimeMinutes } from '../android/lib/chaoxing'
-import type { ChaoxingActivitiesResult, ChaoxingDashboard, ChaoxingProgressResult, ChaoxingSettings, ChaoxingTodo } from '../types'
+import type { ChaoxingActivitiesResult, ChaoxingCourseProgress, ChaoxingDashboard, ChaoxingProgressResult, ChaoxingSettings, ChaoxingTodo } from '../types'
+import './dashboard-swipe.css'
 
 type CourseSection = 'activities' | 'progress'
 type Section = 'todo' | 'works' | 'exams' | CourseSection
@@ -95,6 +98,167 @@ export function useChaoxingCourseData() {
   return { cache, phase, load, reset }
 }
 
+const swipeReveal = 92
+
+function SwipeProgressCard({ item, cardKey, isOpen, confirming, onSwipeStart, onOpen, onClose, onIgnore, onVisit }: {
+  item: ChaoxingCourseProgress
+  cardKey: string
+  isOpen: boolean
+  confirming: boolean
+  onSwipeStart: () => void
+  onOpen: () => void
+  onClose: () => void
+  onIgnore: () => void
+  onVisit: () => void
+}) {
+  const [dragOffset, setDragOffset] = useState<number | null>(null)
+  const gesture = useRef<{
+    id: number
+    startX: number
+    startY: number
+    baseOffset: number
+    offset: number
+    axis: 'horizontal' | 'vertical' | null
+  } | null>(null)
+  const suppressClick = useRef(false)
+  const surfaceRef = useRef<HTMLButtonElement>(null)
+  const fallbackRef = useRef<HTMLButtonElement>(null)
+  const actionRef = useRef<HTMLButtonElement>(null)
+  const full = item.totalTasks > 0 && item.completedTasks >= item.totalTasks
+  const pct = item.percent ?? 0
+
+  useEffect(() => {
+    if (isOpen && document.activeElement === fallbackRef.current) {
+      actionRef.current?.focus({ preventScroll: true })
+    }
+  }, [isOpen])
+
+  function startTouch(event: TouchEvent<HTMLButtonElement>) {
+    if (event.touches.length !== 1) {
+      cancelTouch()
+      return
+    }
+    const touch = event.touches[0]
+    const baseOffset = isOpen ? -swipeReveal : 0
+    suppressClick.current = false
+    gesture.current = {
+      id: touch.identifier, startX: touch.clientX, startY: touch.clientY, baseOffset, offset: baseOffset, axis: null
+    }
+  }
+
+  function moveTouch(event: TouchEvent<HTMLButtonElement>) {
+    const swipe = gesture.current
+    if (!swipe || swipe.axis === 'vertical') return
+    if (event.touches.length !== 1) {
+      cancelTouch()
+      return
+    }
+    const touch = event.touches[0]
+    if (touch.identifier !== swipe.id) return
+    const dx = touch.clientX - swipe.startX
+    const dy = touch.clientY - swipe.startY
+    if (!swipe.axis) {
+      if (Math.max(Math.abs(dx), Math.abs(dy)) <= 8) return
+      suppressClick.current = true
+      swipe.axis = Math.abs(dy) > Math.abs(dx) ? 'vertical' : 'horizontal'
+      if (swipe.axis === 'vertical') return
+      onSwipeStart()
+    }
+    const offset = swipe.baseOffset + dx
+    const resisted = offset < -swipeReveal ? -swipeReveal + (offset + swipeReveal) * 0.25 : offset
+    swipe.offset = Math.max(-112, Math.min(0, resisted))
+    setDragOffset(swipe.offset)
+  }
+
+  function endTouch(event: TouchEvent<HTMLButtonElement>) {
+    const swipe = gesture.current
+    if (!swipe || !Array.from(event.changedTouches).some((touch) => touch.identifier === swipe.id)) return
+    gesture.current = null
+    if (swipe.axis !== 'horizontal') return
+    setDragOffset(null)
+    if (swipe.offset < -44) onOpen()
+    else onClose()
+  }
+
+  function cancelTouch() {
+    gesture.current = null
+    suppressClick.current = true
+    setDragOffset(null)
+  }
+
+  return (
+    <div
+      className={`dash-swipe${isOpen ? ' is-open' : ''}${dragOffset !== null ? ' is-dragging' : ''}`}
+      data-progress-swipe-key={cardKey}
+      onPointerDown={() => { suppressClick.current = false }}
+      onClickCapture={(event) => {
+        if (event.detail > 0 && suppressClick.current) {
+          event.preventDefault()
+          event.stopPropagation()
+        }
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape' && isOpen) {
+          onClose()
+          surfaceRef.current?.focus()
+        }
+      }}
+    >
+      <button
+        ref={surfaceRef}
+        type="button"
+        className={`card dash-prog-card${full ? ' full' : ''}`}
+        style={{ transform: `translateX(${dragOffset ?? (isOpen ? -swipeReveal : 0)}px)` }}
+        onTouchStart={startTouch}
+        onTouchMove={moveTouch}
+        onTouchEnd={endTouch}
+        onTouchCancel={cancelTouch}
+        onClick={() => {
+          if (isOpen) onClose()
+          else onVisit()
+        }}
+      >
+        <div className="dash-prog-top">
+          <span className="dash-prog-copy">
+            <b>{item.courseName}</b>
+            <small>
+              {item.teacherName ? `${item.teacherName} · ` : ''}
+              {item.totalTasks > 0 ? `已完成 ${item.completedTasks} / ${item.totalTasks} 任务点` : '暂无章节任务点'}
+            </small>
+          </span>
+          <strong className={`dash-prog-pct${full ? ' full' : ''}`}>
+            {item.percent == null ? '—' : `${item.percent}%`}
+          </strong>
+        </div>
+        <span className="dash-prog-track" aria-hidden="true">
+          <i style={{ width: `${Math.max(0, Math.min(100, pct))}%` }} />
+        </span>
+      </button>
+      <button
+        ref={fallbackRef}
+        type="button"
+        className="dash-swipe-more"
+        aria-label={`显示忽略操作：${item.courseName}`}
+        aria-expanded={isOpen}
+        tabIndex={isOpen ? -1 : 0}
+        onClick={onOpen}
+      >
+        <span aria-hidden="true">···</span>
+      </button>
+      <button
+        ref={actionRef}
+        type="button"
+        className={`dash-swipe-action${confirming ? ' is-confirming' : ''}`}
+        aria-hidden={!isOpen}
+        tabIndex={isOpen ? 0 : -1}
+        onClick={() => { if (isOpen) onIgnore() }}
+      >
+        {confirming ? '确认忽略' : '忽略'}
+      </button>
+    </div>
+  )
+}
+
 export function Dashboard(props: {
   dashboard: ChaoxingDashboard | null
   loading: boolean
@@ -110,6 +274,8 @@ export function Dashboard(props: {
   const [settings, setSettings] = useState(readSettings)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [foldOpen, setFoldOpen] = useState<Record<string, boolean>>({})
+  const [swipedKey, setSwipedKey] = useState<string | null>(null)
+  const [confirmIgnoreKey, setConfirmIgnoreKey] = useState<string | null>(null)
   const [demoCourses] = useState(buildDemoChaoxingCourses)
   const dash = props.dashboard
   const loggedIn = !!dash?.loggedIn
@@ -129,6 +295,12 @@ export function Dashboard(props: {
   const exams = filterByIgnoredCourses(dash?.exams || [], ignored, courseName)
   const activities = filterByIgnoredCourses(results?.activities?.activities || [], ignored, (item) => item.courseName)
   const progress = filterByIgnoredCourses(results?.progress?.progress || [], ignored, (item) => item.courseName)
+  const inProgress = progress
+    .filter((item) => item.totalTasks > 0 && item.completedTasks < item.totalTasks)
+    .sort((a, b) => (a.percent ?? 0) - (b.percent ?? 0) ||
+      (b.totalTasks - b.completedTasks) - (a.totalTasks - a.completedTasks))
+  const noTasks = progress.filter((item) => item.totalTasks === 0)
+  const completed = progress.filter((item) => item.totalTasks > 0 && item.completedTasks >= item.totalTasks)
   const discovered = new Map<string, string>()
   for (const name of [...ignored, ...namedItems.map(courseName), ...courses.map((c) => c.courseName)]) {
     if (name.trim()) discovered.set(normalizeCourse(name), name.trim())
@@ -156,6 +328,57 @@ export function Dashboard(props: {
   function updateSettings(next: ChaoxingSettings) {
     setSettings(next)
     try { localStorage.setItem(settingsKey, JSON.stringify(next)) } catch { /* Storage may be disabled. */ }
+  }
+
+  const closeSwipe = useCallback(() => {
+    setSwipedKey(null)
+    setConfirmIgnoreKey(null)
+  }, [])
+
+  useEffect(() => {
+    if (swipedKey === null) return
+    function dismissOutside(event: MouseEvent) {
+      const target = event.target
+      if (!(target instanceof Element) || target.closest('[data-progress-swipe-key]')?.getAttribute('data-progress-swipe-key') !== swipedKey) {
+        closeSwipe()
+      }
+    }
+    document.addEventListener('click', dismissOutside, true)
+    return () => document.removeEventListener('click', dismissOutside, true)
+  }, [swipedKey, closeSwipe])
+
+  const renderProgressCard = (item: ChaoxingCourseProgress) => {
+    const key = `${item.courseId}:${item.clazzId}`
+    return (
+      <SwipeProgressCard
+        key={key}
+        cardKey={key}
+        item={item}
+        isOpen={swipedKey === key}
+        confirming={confirmIgnoreKey === key}
+        onSwipeStart={() => {
+          if (swipedKey !== key) setSwipedKey(null)
+          setConfirmIgnoreKey(null)
+        }}
+        onOpen={() => {
+          haptic('light')
+          setSwipedKey(key)
+          setConfirmIgnoreKey(null)
+        }}
+        onClose={closeSwipe}
+        onIgnore={() => {
+          if (confirmIgnoreKey !== key) {
+            haptic('light')
+            setConfirmIgnoreKey(key)
+            return
+          }
+          haptic('medium')
+          updateSettings({ ...settings, ignoredCourses: [...ignored, item.courseName] })
+          closeSwipe()
+        }}
+        onVisit={() => props.onOpenItem(item.url, item.courseName)}
+      />
+    )
   }
 
   const toggleFold = (key: string) => setFoldOpen((prev) => ({ ...prev, [key]: !prev[key] }))
@@ -553,36 +776,36 @@ export function Dashboard(props: {
 
               {section === 'progress' && (
                 <>
-                  {progress.length > 0 && (
+                  <div className="dash-progress-hint">
+                    <span>左滑课程卡片可快速忽略</span>
+                    {ignored.length > 0 && (
+                      <button type="button" onClick={() => setSettingsOpen(true)}>
+                        管理已忽略 ({ignored.length})
+                      </button>
+                    )}
+                  </div>
+                  {(inProgress.length > 0 || noTasks.length > 0) && (
                     <div className="dash-prog-grid">
-                      {progress.map((item) => {
-                        const pct = item.percent ?? 0
-                        const full = item.percent != null && item.percent >= 100
-                        return (
-                          <button
-                            type="button"
-                            className={`card dash-prog-card${full ? ' full' : ''}`}
-                            key={`${item.courseId}:${item.clazzId}`}
-                            onClick={() => props.onOpenItem(item.url, item.courseName)}
-                          >
-                            <div className="dash-prog-top">
-                              <span className="dash-prog-copy">
-                                <b>{item.courseName}</b>
-                                <small>
-                                  {item.teacherName ? `${item.teacherName} · ` : ''}
-                                  {item.totalTasks > 0 ? `已完成 ${item.completedTasks} / ${item.totalTasks} 任务点` : '暂无章节任务点'}
-                                </small>
-                              </span>
-                              <strong className={`dash-prog-pct${full ? ' full' : ''}`}>
-                                {item.percent == null ? '—' : `${item.percent}%`}
-                              </strong>
-                            </div>
-                            <span className="dash-prog-track" aria-hidden="true">
-                              <i style={{ width: `${Math.max(0, Math.min(100, pct))}%` }} />
-                            </span>
-                          </button>
-                        )
-                      })}
+                      {inProgress.map(renderProgressCard)}
+                      {noTasks.map(renderProgressCard)}
+                    </div>
+                  )}
+                  {completed.length > 0 && (
+                    <div className="dash-fold-wrap">
+                      <button
+                        type="button"
+                        className="dash-fold-btn"
+                        onClick={() => toggleFold('progressDone')}
+                        aria-expanded={!!foldOpen.progressDone}
+                      >
+                        <span>已完成 {completed.length} 门</span>
+                        <span>{foldOpen.progressDone ? '收起' : '展开 ›'}</span>
+                      </button>
+                      {foldOpen.progressDone && (
+                        <div className="dash-prog-grid">
+                          {completed.map(renderProgressCard)}
+                        </div>
+                      )}
                     </div>
                   )}
                   {!courseLoading && !authRequired && !courseError && courseResult && progress.length === 0 && (

@@ -1,0 +1,111 @@
+.dash-progress-hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 2px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.dash-progress-hint button {
+  min-height: 32px;
+  padding: 4px 2px;
+  color: var(--brand);
+  white-space: nowrap;
+}
+
+.dash-swipe {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: var(--shadow);
+  touch-action: pan-y pinch-zoom;
+}
+
+.dash-swipe .dash-prog-card {
+  position: relative;
+  z-index: 1;
+  box-shadow: none;
+  transition: transform .22s ease-out;
+}
+
+.dash-swipe.is-dragging .dash-prog-card {
+  transition: none;
+}
+
+.dash-swipe-action {
+  --swipe-action-bg: #fbc3a7;
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: 92px;
+  border-radius: 0 var(--radius) var(--radius) 0;
+  background: var(--swipe-action-bg);
+  box-shadow: -20px 0 var(--swipe-action-bg);
+  color: #762912;
+  font-size: 14px;
+  font-weight: 650;
+  pointer-events: none;
+  transition: background-color .18s ease, color .18s ease, box-shadow .18s ease;
+}
+
+.dash-swipe.is-open .dash-swipe-action {
+  pointer-events: auto;
+}
+
+.dash-swipe-action.is-confirming {
+  --swipe-action-bg: #ae2434;
+  color: #fff;
+  font-weight: 750;
+}
+
+.dash-swipe-more {
+  position: absolute;
+  z-index: 2;
+  top: 8px;
+  right: 8px;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  color: var(--muted);
+  background: var(--raised);
+  font-size: 18px;
+  line-height: 1;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.dash-swipe:not(.is-open) .dash-swipe-more:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.dash-swipe :is(.dash-prog-card, .dash-swipe-action, .dash-swipe-more):focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: -3px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .dash-swipe .dash-prog-card {
+    padding-right: 48px;
+  }
+
+  .dash-swipe:not(.is-open):not(.is-dragging):hover .dash-swipe-more {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dash-swipe .dash-prog-card,
+  .dash-swipe-action {
+    transition: none;
+  }
+}
+
+.dash-hero:not(.clear) .dash-hero-count small {
+  color: rgba(255, 255, 255, 0.88);
+  opacity: 1;
+}

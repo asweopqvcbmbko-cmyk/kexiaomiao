@@ -8,6 +8,7 @@ const paths: Record<string, string> = {
   task: 'm4 6 2 2 4-4M13 6h7M4 13h5M13 13h7M4 20h5M13 20h7',
   user: 'M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0ZM4 21v-2a8 8 0 0 1 16 0v2',
   bell: 'M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4',
+  search: 'M10.5 17.5a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20.5 20.5l-5-5',
   refresh: 'M20 7v-4l-3 3a8 8 0 1 0 3 8M20 7h-5',
   arrow: 'm9 5 7 7-7 7',
   left: 'm15 5-7 7 7 7',

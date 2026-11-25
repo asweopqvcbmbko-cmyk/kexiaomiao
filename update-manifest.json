@@ -1,19 +1,19 @@
 {
-    "updatedAt":  "2026-11-25T03:05:16Z",
+    "updatedAt":  "2026-11-25T03:37:34Z",
     "schemaVersion":  1,
     "beta":  {
                  "mirrors":  [
-                                 "https://edgeone.gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2-beta.2/kexiaomiao-v0.2.2-beta.2.apk",
-                                 "https://gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2-beta.2/kexiaomiao-v0.2.2-beta.2.apk"
+                                 "https://edgeone.gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2-beta.3/kexiaomiao-v0.2.2-beta.3.apk",
+                                 "https://gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2-beta.3/kexiaomiao-v0.2.2-beta.3.apk"
                              ],
-                 "apkUrl":  "https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2-beta.2/kexiaomiao-v0.2.2-beta.2.apk",
-                 "size":  3378851,
-                 "notes":  "1. 新增全校 30 个学院/学部/书院通知自由多选订阅（上限 5 个，仅抓取已订阅学院，单院超时隔离）；2. 通知页全面重构为现代卡片分层风（关键字搜索、仅看未读、彩色来源徽章、按学部/书院分组订阅弹窗）；3. 修复学习通仪表盘与设置页课程名称截断问题，完整展示全部课程名。",
-                 "publishedAt":  "2026-11-25T03:05:16Z",
-                 "sha256":  "99013933d378083e5bd33d4fb1471495a2a9302f466300347edbf11cf6369717",
+                 "apkUrl":  "https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2-beta.3/kexiaomiao-v0.2.2-beta.3.apk",
+                 "size":  3381083,
+                 "notes":  "1. 仪表盘「进度」页改为未完成低进度优先排序，100% 已完成自动折叠到底部，并支持 iOS 风格左滑露出「忽略 → 确认忽略」两步防误触快速忽略；2. 修复仪表盘蓝色焦点卡倒计时单位对比度；3. 校园通知页重构为极简杂志风：去掉多余返回键与重复订阅按钮，页头仅留 [搜索 / 学院 / 刷新]，搜索栏按需展开，「未读」融合进纯净频道栏，列表按 今天 / 近 7 天 / 更早 时间分组整卡呈现。",
+                 "publishedAt":  "2026-11-25T03:37:34Z",
+                 "sha256":  "36ff7cb978e649d4212e408178825d6620782a8936e1b1473bdb2b3dc069f426",
                  "channel":  "beta",
-                 "versionName":  "0.2.2-beta.2",
-                 "versionCode":  18
+                 "versionName":  "0.2.2-beta.3",
+                 "versionCode":  19
              },
     "stable":  {
                    "mirrors":  [

@@ -1,8 +1,8 @@
-import { useMemo, useRef, useState } from 'react'
+import { useId, useMemo, useRef, useState } from 'react'
 import { Icon } from '../icons'
 import { PageHeader, Empty } from '../components/ui'
 import { CollegePickerModal } from '../components/CollegePickerModal'
-import { daysUntil, noticeDate, openAtLabel, type chargerView } from '../adapters'
+import { daysUntil, noticeDate, noticeKey, openAtLabel, type chargerView } from '../adapters'
 import { getCollegeById, getSubscribedCollegeSources, readSubscribedColleges, writeSubscribedColleges } from '../college-notices'
 import { haptic } from '../haptics'
 import type { Exam, NoticeItem } from '../types'
@@ -37,11 +37,18 @@ function SubShell(props: {
 }
 
 const CORE_NOTICE_FILTERS = [
-  { id: 'all', shortName: '全部' },
   { id: 'jwc', shortName: '教务处' },
-  { id: 'school', shortName: '全校通知' },
-  { id: 'news', shortName: '校园新闻' }
+  { id: 'school', shortName: '全校' },
+  { id: 'news', shortName: '新闻' }
 ]
+
+function localNoticeDate(now: Date, daysAgo = 0) {
+  const date = new Date(now)
+  date.setDate(date.getDate() - daysAgo)
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${date.getFullYear()}-${month}-${day}`
+}
 
 export function NoticesPage(props: {
   items: NoticeItem[]
@@ -52,7 +59,7 @@ export function NoticesPage(props: {
   subscribedColleges?: string[]
   onChangeSubscribedColleges?: (ids: string[]) => void
   onRefresh: () => void
-  onBack: () => void
+  onBack?: () => void
   onOpen: (n: NoticeItem) => void
   onMarkAllRead: () => void
   onLogin?: () => void
@@ -60,35 +67,54 @@ export function NoticesPage(props: {
   const [savedColleges, setSavedColleges] = useState(readSubscribedColleges)
   const subscribedColleges = props.subscribedColleges ?? savedColleges
   const collegeSources = getSubscribedCollegeSources(subscribedColleges)
-  const sources = [...CORE_NOTICE_FILTERS, ...collegeSources]
   const [src, setSrc] = useState('all')
   const [query, setQuery] = useState('')
-  const [unreadOnly, setUnreadOnly] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
+  const searchId = useId()
   const searchInput = useRef<HTMLInputElement>(null)
-  const activeSource = sources.some(({ id }) => id === src) ? src : 'all'
+  const searchTrigger = useRef<HTMLButtonElement>(null)
   const term = query.trim().toLowerCase()
 
   const readIds = useMemo(() => new Set(props.readIds), [props.readIds])
-  const unreadSources = new Set<string>()
-  let unread = 0
-  for (const n of props.items) {
-    if (readIds.has(`${n.source}:${n.id}`)) continue
-    unread += 1
-    unreadSources.add(n.source)
-  }
+  const unread = props.items.filter((n) => !readIds.has(noticeKey(n))).length
+  const channels = [
+    { id: 'all', shortName: '全部' },
+    ...(unread > 0 || src === 'unread' ? [{ id: 'unread', shortName: `未读 ${unread}` }] : []),
+    ...CORE_NOTICE_FILTERS,
+    ...collegeSources
+  ]
+  const activeSource = channels.some(({ id }) => id === src) ? src : 'all'
 
   const list = props.items.filter((n) =>
-    (activeSource === 'all' || n.source === activeSource) &&
-    (!unreadOnly || !readIds.has(`${n.source}:${n.id}`)) &&
+    (activeSource === 'all' || (activeSource === 'unread' ? !readIds.has(noticeKey(n)) : n.source === activeSource)) &&
     (!term || [n.title, n.dept, n.sourceName].some((value) => value?.toLowerCase().includes(term)))
-  ).slice(0, 100)
-  const filtered = Boolean(term || unreadOnly || activeSource !== 'all')
+  )
+  const filtered = Boolean(term || activeSource !== 'all')
+  const now = new Date()
+  const today = localNoticeDate(now)
+  const yesterday = localNoticeDate(now, 1)
+  const weekAgo = localNoticeDate(now, 7)
+  const groups: { label: string; items: NoticeItem[] }[] = [
+    { label: '今天', items: [] },
+    { label: '近 7 天', items: [] },
+    { label: '更早', items: [] }
+  ]
+  for (const n of list) {
+    const groupIndex = n.date === today ? 0 : n.date >= weekAgo && n.date < today ? 1 : 2
+    groups[groupIndex].items.push(n)
+  }
+  const visibleGroups = groups.filter((group) => group.items.length > 0)
+
+  function closeSearch() {
+    setSearchOpen(false)
+    setQuery('')
+    searchTrigger.current?.focus()
+  }
 
   function clearFilters() {
     haptic('light')
     setSrc('all')
-    setUnreadOnly(false)
     setQuery('')
   }
 
@@ -100,25 +126,59 @@ export function NoticesPage(props: {
   }
 
   return (
-    <SubShell
-      title="校园通知"
-      sub={`${unread} 条未读 · 本地共 ${props.items.length} 条`}
-      eyebrow="CAMPUS NOTICES"
-      refreshing={props.refreshing}
-      onRefresh={props.onRefresh}
-      onBack={props.onBack}
-      extra={
-        props.items.length ? (
-          <button
-            className="mark-all-btn"
-            onClick={props.onMarkAllRead}
-            disabled={unread === 0}
-          >
-            {unread > 0 ? '全部已读' : '已全部已读'}
-          </button>
-        ) : null
-      }
-    >
+    <div className="notices-page">
+      <PageHeader
+        title="校园通知"
+        sub={unread > 0 ? `${unread} 条未读` : `全部已读 · 共 ${props.items.length} 条`}
+        refreshing={props.refreshing}
+        onRefresh={props.onRefresh}
+        extra={
+          <>
+            <button
+              ref={searchTrigger}
+              className="iconbtn"
+              type="button"
+              aria-label="搜索通知"
+              aria-expanded={searchOpen}
+              aria-controls={searchOpen ? searchId : undefined}
+              onClick={() => searchOpen ? closeSearch() : setSearchOpen(true)}
+            >
+              <Icon name="search" />
+            </button>
+            <button
+              className={`mark-all-btn notice-college-trigger${subscribedColleges.length === 0 ? ' has-dot' : ''}`}
+              type="button"
+              aria-haspopup="dialog"
+              onClick={() => setPickerOpen(true)}
+            >
+              {collegeSources.length ? `学院(${collegeSources.length})` : '学院'}
+            </button>
+          </>
+        }
+      />
+      {searchOpen && (
+        <div className="notice-search-bar" id={searchId} role="search" aria-label="搜索通知">
+          <div className="notice-search notice-search-with-clear">
+            <Icon name="search" />
+            <input
+              ref={searchInput}
+              type="search"
+              aria-label="搜索标题或发布部门"
+              placeholder="搜索标题或发布部门…"
+              autoFocus
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+            {query && (
+              <button className="notice-search-clear" type="button" aria-label="清除搜索" onClick={() => {
+                setQuery('')
+                searchInput.current?.focus()
+              }}>×</button>
+            )}
+          </div>
+          <button className="notice-search-cancel" type="button" onClick={closeSearch}>取消</button>
+        </div>
+      )}
       {props.authRequired ? (
         <div className="demo-banner" role="status" style={{ marginBottom: 14 }}>
           <span className="demo-banner-text">校园网认证已过期，当前显示离线缓存；已缓存正文仍可直接阅读</span>
@@ -132,104 +192,63 @@ export function NoticesPage(props: {
         <div className="card" style={{ padding: '12px 16px', marginBottom: 14, fontSize: 12 }}>当前显示的是本地离线缓存，刚才刷新失败。</div>
       ) : null}
 
-      <div className="card notice-toolbar">
-        <div className="notice-toolbar-row">
-          <div className="notice-search notice-search-with-clear">
-            <span className="notice-search-icon" aria-hidden="true" />
-            <input
-              ref={searchInput}
-              type="search"
-              aria-label="搜索通知标题或发布部门"
-              placeholder="搜索通知标题或发布部门…"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-            />
-            {query && (
-              <button className="notice-search-clear" type="button" aria-label="清除搜索" onClick={() => {
-                setQuery('')
-                searchInput.current?.focus()
-              }}>×</button>
-            )}
-          </div>
+      <div className="notice-channels" role="group" aria-label="筛选通知">
+        {channels.map(({ id, shortName }) => (
           <button
-            className="notice-unread-toggle"
+            className="notice-channel"
             type="button"
-            aria-pressed={unreadOnly}
+            key={id}
+            aria-pressed={activeSource === id}
             onClick={() => {
-              haptic('light')
-              setUnreadOnly((current) => !current)
+              if (activeSource !== id) haptic('light')
+              setSrc(id)
             }}
           >
-            仅看未读 <span>{unread}</span>
+            {getCollegeById(id) && <i className="notice-college-dot" aria-hidden="true" />}
+            {shortName}
           </button>
-        </div>
-        <div className="notice-source-controls">
-          <div className="filterbar notice-filterbar" role="group" aria-label="筛选通知来源">
-            {sources.map(({ id, shortName }) => {
-              const hasUnread = id === 'all' ? unread > 0 : unreadSources.has(id)
+        ))}
+      </div>
+
+      {visibleGroups.length ? visibleGroups.map((group, index) => (
+        <section className="notice-group" key={group.label}>
+          <div className="notice-group-head">
+            <h3>{group.label}</h3>
+            {index === 0 && unread > 0 && (
+              <button className="notice-mark-read" type="button" onClick={props.onMarkAllRead}>全部已读</button>
+            )}
+          </div>
+          <div className="card notice-group-card">
+            {group.items.map((n) => {
+              const key = noticeKey(n)
+              const read = readIds.has(key)
+              const college = getCollegeById(n.source)
+              const core = CORE_NOTICE_FILTERS.find(({ id }) => id === n.source)
+              const sourceName = n.sourceName?.trim() || college?.shortName || core?.shortName || n.source
+              const variant = college ? ' src-college' : core ? ` src-${core.id}` : ''
+              const shortDate = n.date === today ? '今天' : n.date === yesterday ? '昨天'
+                : /^\d{4}-\d{2}-\d{2}$/.test(n.date) ? n.date.slice(5).replace('-', '/') : noticeDate(n)
               return (
-                <button
-                  className={`chip${activeSource === id ? ' selected' : ''}`}
-                  type="button"
-                  key={id}
-                  aria-pressed={activeSource === id}
-                  aria-label={hasUnread ? `${shortName}，有未读通知` : undefined}
-                  onClick={() => {
-                    if (activeSource !== id) haptic('light')
-                    setSrc(id)
-                  }}
-                >
-                  {getCollegeById(id) && <i className="notice-college-dot" aria-hidden="true" />}
-                  {shortName}
-                  {hasUnread && <i className="notice-filter-dot" aria-hidden="true" />}
+                <button className={`notice-item-row${read ? ' is-read' : ''}`} type="button" key={key} onClick={() => props.onOpen(n)}>
+                  <span className="notice-item-dot" aria-hidden="true" />
+                  <span className="notice-item-copy">
+                    <span className="notice-item-title">
+                      <span className="notice-read-status">{read ? '已读：' : '未读：'}</span>
+                      {n.title}
+                    </span>
+                    <span className="notice-item-meta">
+                      <span className={`notice-source-badge${variant}`}>{sourceName}</span>
+                      {shortDate && <span className="notice-item-date">{shortDate}</span>}
+                    </span>
+                  </span>
+                  <Icon name="arrow" className="arrow" />
                 </button>
               )
             })}
           </div>
-          <button className="softbtn notice-manage-colleges" type="button" onClick={() => setPickerOpen(true)}>
-            {collegeSources.length ? `学院(${collegeSources.length})` : '+ 订阅学院'}
-          </button>
-        </div>
-      </div>
-
-      {subscribedColleges.length === 0 && (
-        <div className="card notice-college-cta">
-          <span className="notice-college-cta-icon"><Icon name="cap" /></span>
-          <div>
-            <strong>还没订阅你的学院？</strong>
-            <small>支持全校 30 个学院与书院，点此一键订阅</small>
-          </div>
-          <button className="softbtn" type="button" onClick={() => setPickerOpen(true)}>去订阅</button>
-        </div>
-      )}
-
-      {list.length ? (
-        <div className="notice-card-list">
-          {list.map((n) => {
-            const key = `${n.source}:${n.id}`
-            const read = readIds.has(key)
-            const college = getCollegeById(n.source)
-            const core = CORE_NOTICE_FILTERS.find(({ id }) => id !== 'all' && id === n.source)
-            const sourceName = n.sourceName?.trim() || college?.shortName || core?.shortName || n.source
-            const dept = n.dept?.trim()
-            const variant = college ? ' src-college' : core ? ` src-${core.id}` : ''
-            return (
-              <button className={`card notice notice-card-row${read ? ' is-read' : ''}`} type="button" key={key} onClick={() => props.onOpen(n)}>
-                <span className="notice-card-meta">
-                  <span className={`notice-source-badge${variant}`}>{sourceName}</span>
-                  <span className="notice-card-date">{noticeDate(n)}</span>
-                </span>
-                <span className="notice-card-title">
-                  <span className="notice-read-status">{read ? '已读：' : '未读：'}</span>
-                  {n.title}
-                </span>
-                {dept && dept !== sourceName && <span className="notice-card-dept">{dept}</span>}
-              </button>
-            )
-          })}
-        </div>
-      ) : props.items.length > 0 && filtered ? (
-        <Empty title="没有匹配搜索条件的通知" icon="bell">
+        </section>
+      )) : props.items.length > 0 && filtered ? (
+        <Empty title={activeSource === 'unread' && !term ? '没有未读通知' : '没有匹配的通知'} icon="bell">
           <button className="softbtn notice-clear-filters" type="button" onClick={clearFilters}>清除筛选</button>
         </Empty>
       ) : (
@@ -239,7 +258,7 @@ export function NoticesPage(props: {
       {pickerOpen && (
         <CollegePickerModal selected={subscribedColleges} onSave={saveColleges} onClose={() => setPickerOpen(false)} />
       )}
-    </SubShell>
+    </div>
   )
 }
 
