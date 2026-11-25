@@ -7,6 +7,7 @@ import android.content.ContentValues;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
+import android.graphics.Rect;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
@@ -200,7 +201,7 @@ public class SchoolBrowserPlugin extends Plugin {
                 closeOverlay();
                 LinearLayout root = new LinearLayout(getContext());
                 root.setOrientation(LinearLayout.VERTICAL);
-                root.setBackgroundColor(Color.parseColor("#0B1016"));
+                root.setBackgroundColor(Color.WHITE);
 
                 LinearLayout bar = new LinearLayout(getContext());
                 bar.setOrientation(LinearLayout.HORIZONTAL);
@@ -221,24 +222,11 @@ public class SchoolBrowserPlugin extends Plugin {
                 bar.addView(tv);
                 bar.addView(done);
 
-                // 适配 Edge-to-Edge 状态栏/刘海/底部导航栏与软键盘安全区
-                ViewCompat.setOnApplyWindowInsetsListener(root, (v, windowInsets) -> {
-                    Insets topBars = windowInsets.getInsets(
-                            WindowInsetsCompat.Type.statusBars() | WindowInsetsCompat.Type.displayCutout());
-                    Insets bottomBars = windowInsets.getInsets(
-                            WindowInsetsCompat.Type.navigationBars() | WindowInsetsCompat.Type.ime());
-                    Insets sideBars = windowInsets.getInsets(
-                            WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout());
-                    bar.setPadding(
-                            dp(14) + sideBars.left,
-                            dp(10) + topBars.top,
-                            dp(10) + sideBars.right,
-                            dp(10));
-                    v.setPadding(0, 0, 0, bottomBars.bottom);
-                    return WindowInsetsCompat.CONSUMED;
-                });
-
                 WebView wv = buildWebView();
+                wv.setBackgroundColor(Color.WHITE);
+                wv.setFocusable(true);
+                wv.setFocusableInTouchMode(true);
+                configureOverlayInsets(root, bar, wv);
                 // 常规可见登录页用手机 UA 方便操作；学习通静默驱动（含二维码/短信模板）按 desktopUa 使用桌面 UA
                 wv.getSettings().setUserAgentString(desktopUa ? UA : null);
                 wv.getSettings().setUseWideViewPort(true);
@@ -332,6 +320,71 @@ public class SchoolBrowserPlugin extends Plugin {
                 call.reject("open failed: " + e.getMessage());
             }
         });
+    }
+
+    private void configureOverlayInsets(LinearLayout root, LinearLayout bar, WebView webView) {
+        class OverlayInsets {
+            private final int[] location = new int[2];
+            private final Rect visibleFrame = new Rect();
+            private final int minWebHeight = dp(96);
+            private int unobscuredBottom;
+            private Insets nav = Insets.NONE;
+            private Insets sides = Insets.NONE;
+            private int imeBottom;
+
+            void applyPadding() {
+                if (root.getHeight() == 0) return;
+                View decor = root.getRootView();
+                decor.getLocationOnScreen(location);
+                int decorBottom = location[1] + decor.getHeight();
+                if (imeBottom == 0) unobscuredBottom = decorBottom;
+
+                int bottom = nav.bottom;
+                if (imeBottom > 0) {
+                    int windowBottom;
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        windowBottom = getActivity().getWindowManager().getCurrentWindowMetrics().getBounds().bottom;
+                    } else if (unobscuredBottom > 0) {
+                        windowBottom = Math.max(unobscuredBottom, decorBottom);
+                    } else {
+                        root.getWindowVisibleDisplayFrame(visibleFrame);
+                        windowBottom = Math.max(decorBottom, visibleFrame.bottom + imeBottom);
+                    }
+
+                    root.getLocationOnScreen(location);
+                    int overlayBottom = location[1] - Math.round(root.getTranslationY()) + root.getHeight();
+                    int alreadyResizedByParent = Math.max(0, windowBottom - overlayBottom);
+                    bottom = Math.max(bottom, Math.max(0, imeBottom - alreadyResizedByParent));
+                }
+
+                int maxPadding = Math.max(0, root.getHeight() - bar.getMeasuredHeight() - minWebHeight);
+                bottom = Math.min(bottom, maxPadding);
+                if (root.getPaddingLeft() != sides.left || root.getPaddingRight() != sides.right
+                        || root.getPaddingBottom() != bottom) {
+                    root.setPadding(sides.left, 0, sides.right, bottom);
+                    webView.requestLayout();
+                }
+            }
+        }
+
+        OverlayInsets insets = new OverlayInsets();
+        ViewCompat.setOnApplyWindowInsetsListener(root, (v, windowInsets) -> {
+            Insets top = windowInsets.getInsets(
+                    WindowInsetsCompat.Type.statusBars() | WindowInsetsCompat.Type.displayCutout());
+            insets.nav = windowInsets.getInsets(WindowInsetsCompat.Type.navigationBars());
+            insets.sides = windowInsets.getInsets(
+                    WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout());
+            insets.imeBottom = windowInsets.getInsets(WindowInsetsCompat.Type.ime()).bottom;
+            int topPadding = dp(10) + top.top;
+            if (bar.getPaddingTop() != topPadding) {
+                bar.setPadding(dp(14), topPadding, dp(10), dp(10));
+                webView.requestLayout();
+            }
+            insets.applyPadding();
+            return WindowInsetsCompat.CONSUMED;
+        });
+        // Insets may arrive before the parent has applied its IME resize.
+        root.addOnLayoutChangeListener((v, l, t, r, b, oldL, oldT, oldR, oldB) -> insets.applyPadding());
     }
 
     private void animateOverlayIn(LinearLayout root) {

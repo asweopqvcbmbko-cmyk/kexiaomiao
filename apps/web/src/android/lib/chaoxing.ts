@@ -231,6 +231,19 @@ function buildReadPageJs(kind: 'work' | 'exam'): string {
 
 export class ChaoxingParseError extends Error {}
 export class ChaoxingAuthError extends Error {}
+export class ChaoxingRiskError extends Error {
+  readonly status: 403 | 429
+  constructor(status: 403 | 429) {
+    super(`Chaoxing rejected the request (HTTP ${status})`)
+    this.status = status
+  }
+}
+
+export type ChaoxingHttpResponse = { status: number; url: string; data: string }
+export type ChaoxingHttpClient = {
+  get(url: string, opts?: { headers?: Record<string, string>; timeoutMs?: number }): Promise<ChaoxingHttpResponse>
+  getCookies?(url: string): Promise<string>
+}
 
 const READ_EXAM_TABLE_JS = String.raw`(() => {
   const table = document.querySelector('table.dataTable');
@@ -430,6 +443,10 @@ async function fetchCourseJson(engine: Engine, url: string): Promise<any> {
 export async function fetchChaoxingCourses(engine: Engine): Promise<(ChaoxingCourse & CourseNames)[]> {
   await loadCoursePage(engine, CHAOXING_WORK_URL)
   const raw = await fetchCourseJson(engine, ORIGIN + '/mycourse/backclazzdata?view=json&mcode=')
+  return readCourseList(raw)
+}
+
+function readCourseList(raw: any) {
   const courses = parseCourseListJson(raw)
   if (!Array.isArray(raw?.channelList) || raw.success === false ||
       (!courses.length && raw.channelList.some((channel: any) => channel?.cataid === '100000002'))) {
@@ -446,6 +463,43 @@ const activityTypes: Record<string, string> = {
   2: '签到', 4: '抢答', 14: '问卷', 42: '随堂测验', 35: '分组任务', 5: '主题讨论'
 }
 
+function activityListUrl({ courseId, clazzId }: ChaoxingCourse, params?: Record<string, string>) {
+  return courseUrl(MOBILE_ORIGIN, '/v2/apis/active/student/activelist', {
+    fid: '0', courseId, classId: clazzId, showNotStartedActive: '0', ...params
+  })
+}
+
+function readCourseActivities(raw: any, course: ChaoxingCourse): ChaoxingActivity[] {
+  const { courseId, clazzId, courseName } = course
+  const list = [raw?.data?.activeList, raw?.data?.list, raw?.data?.data, raw?.activeList, raw?.data, raw].find(Array.isArray)
+  if (!list || raw?.result === false || raw?.success === false) {
+    throw new ChaoxingParseError('Unexpected Chaoxing activity list')
+  }
+  const fallback = activityListUrl(course)
+  return list.map((item) => {
+    const activeId = field(item?.id ?? item?.activeId)
+    const title = field(item?.nameOne ?? item?.name ?? item?.title)
+    if (!activeId || !title) throw new ChaoxingParseError('Invalid Chaoxing activity')
+    const ongoing = Number(item.status) === 1
+    const finished = Number(item.status) === 2
+    let href = fallback
+    try {
+      const target = new URL(field(item.url), MOBILE_ORIGIN)
+      if (item.url && /^https?:$/.test(target.protocol) && target.hostname.endsWith('.chaoxing.com') && !target.username && !target.password) {
+        target.protocol = 'https:'
+        href = target.href
+      }
+    } catch { /* Use the course activity list. */ }
+    return {
+      activeId, title, courseId, clazzId, courseName, ongoing, finished,
+      type: activityTypes[field(item.activeType)] || '课堂活动',
+      status: ongoing ? '进行中' : finished ? '已结束' : '未开始',
+      endTime: field(item.endTime ?? item.endTimeStamp) || undefined,
+      url: href
+    }
+  })
+}
+
 export async function fetchChaoxingActivities(engine: Engine, ignoredCourses: string[] = [], delayMs = 500): Promise<ChaoxingActivitiesResult> {
   const courses = await fetchChaoxingCourses(engine)
   const selected = filterByIgnoredCourses(courses, ignoredCourses, getCourseNames)
@@ -453,40 +507,9 @@ export async function fetchChaoxingActivities(engine: Engine, ignoredCourses: st
   if (selected.length) await loadCoursePage(engine, MOBILE_ORIGIN + '/')
   for (const [index, course] of selected.entries()) {
     if (index > 0) await sleep(delayMs)
-    const { courseId, clazzId, courseName } = course
-    const url = courseUrl(MOBILE_ORIGIN, '/v2/apis/active/student/activelist', {
-      fid: '0', courseId, classId: clazzId, showNotStartedActive: '0', _: String(Date.now())
-    })
+    const url = activityListUrl(course, { _: String(Date.now()) })
     const raw = await fetchCourseJson(engine, url)
-    const list = [raw?.data?.activeList, raw?.data?.list, raw?.data?.data, raw?.activeList, raw?.data, raw].find(Array.isArray)
-    if (!list || raw?.result === false || raw?.success === false) {
-      throw new ChaoxingParseError('Unexpected Chaoxing activity list')
-    }
-    for (const item of list) {
-      const activeId = field(item?.id ?? item?.activeId)
-      const title = field(item?.nameOne ?? item?.name ?? item?.title)
-      if (!activeId || !title) throw new ChaoxingParseError('Invalid Chaoxing activity')
-      const ongoing = Number(item.status) === 1
-      const finished = Number(item.status) === 2
-      const fallback = courseUrl(MOBILE_ORIGIN, '/v2/apis/active/student/activelist', {
-        fid: '0', courseId, classId: clazzId, showNotStartedActive: '0'
-      })
-      let href = fallback
-      try {
-        const target = new URL(field(item.url), MOBILE_ORIGIN)
-        if (item.url && /^https?:$/.test(target.protocol) && target.hostname.endsWith('.chaoxing.com') && !target.username && !target.password) {
-          target.protocol = 'https:'
-          href = target.href
-        }
-      } catch { /* Use the course activity list. */ }
-      activities.push({
-        activeId, title, courseId, clazzId, courseName, ongoing, finished,
-        type: activityTypes[field(item.activeType)] || '课堂活动',
-        status: ongoing ? '进行中' : finished ? '已结束' : '未开始',
-        endTime: field(item.endTime ?? item.endTimeStamp) || undefined,
-        url: href
-      })
-    }
+    for (const activity of readCourseActivities(raw, course)) activities.push(activity)
   }
   return { loggedIn: true, courses, activities, fetchedAt: new Date().toISOString() }
 }
@@ -506,8 +529,7 @@ export async function fetchChaoxingProgress(engine: Engine, ignoredCourses: stri
   const progress: ChaoxingProgressResult['progress'] = []
   for (const [index, course] of selected.entries()) {
     if (index > 0) await sleep(delayMs)
-    const { courseId, clazzId, cpi, courseName, teacherName } = course
-    const params = { courseid: courseId, clazzid: clazzId, cpi, ut: 's' }
+    const params = progressParams(course)
     const url = courseUrl(STATS_ORIGIN, '/study-data/index', params)
     await loadCoursePage(engine, course.enc ? url + '&' + new URLSearchParams({ stuenc: course.enc }) : url)
     const result = await engine.run(READ_PROGRESS_JS)
@@ -517,18 +539,147 @@ export async function fetchChaoxingProgress(engine: Engine, ignoredCourses: stri
     const pEnc = field(page?.pEnc) || course.pEnc
     if (!counts && pEnc) {
       const raw = await fetchCourseJson(engine, courseUrl(STATS_ORIGIN, '/stat2/study-data/job', { ...params, pEnc }))
-      if (raw?.status && raw.data) counts = [raw.data.job, raw.data.publishJobNum]
+      counts = readJobCounts(raw)
     }
-    const completedTasks = Number(field(counts?.[0]) || NaN)
-    const totalTasks = Number(field(counts?.[1]) || NaN)
-    if (!Number.isSafeInteger(completedTasks) || !Number.isSafeInteger(totalTasks) ||
-        completedTasks < 0 || completedTasks > totalTasks) {
-      throw new ChaoxingParseError('Unexpected Chaoxing task counts')
-    }
-    progress.push({
-      courseId, clazzId, courseName, teacherName, completedTasks, totalTasks, url,
-      percent: totalTasks > 0 ? Math.round(completedTasks / totalTasks * 100) : null
-    })
+    progress.push(normalizeProgress(course, url, counts))
   }
+  return { loggedIn: true, courses, progress, fetchedAt: new Date().toISOString() }
+}
+
+function progressParams({ courseId, clazzId, cpi }: ChaoxingCourse) {
+  return { courseid: courseId, clazzid: clazzId, cpi, ut: 's' }
+}
+
+function readJobCounts(raw: any): unknown[] | undefined {
+  if (raw?.status && raw.data) return [raw.data.job, raw.data.publishJobNum]
+}
+
+function normalizeProgress(course: ChaoxingCourse, url: string, counts?: unknown[]): ChaoxingProgressResult['progress'][number] {
+  const { courseId, clazzId, courseName, teacherName } = course
+  const completedTasks = Number(field(counts?.[0]) || NaN)
+  const totalTasks = Number(field(counts?.[1]) || NaN)
+  if (!Number.isSafeInteger(completedTasks) || !Number.isSafeInteger(totalTasks) ||
+      completedTasks < 0 || completedTasks > totalTasks) {
+    throw new ChaoxingParseError('Unexpected Chaoxing task counts')
+  }
+  return {
+    courseId, clazzId, courseName, teacherName, completedTasks, totalTasks, url,
+    percent: totalTasks > 0 ? Math.round(completedTasks / totalTasks * 100) : null
+  }
+}
+
+type CourseBatchOptions = { concurrency?: number; delayMs?: number }
+
+async function runConcurrentBatches<T, R>(
+  items: T[], run: (item: T, checkActive: () => void) => Promise<R>,
+  { concurrency = 2, delayMs: batchDelayMs = 200 }: CourseBatchOptions = {}
+): Promise<R[]> {
+  const batchSize = concurrency < 2 ? 1 : 2
+  const results: R[] = []
+  let failure: { error: unknown } | undefined
+  const checkActive = () => {
+    if (failure) throw failure.error
+  }
+  for (let start = 0; start < items.length; start += batchSize) {
+    if (start > 0) await sleep(batchDelayMs)
+    const batch = await Promise.all(items.slice(start, start + batchSize).map(async (item) => {
+      try {
+        return await run(item, checkActive)
+      } catch (error) {
+        failure ??= { error }
+        throw error
+      }
+    }))
+    results.push(...batch)
+  }
+  return results
+}
+
+const loginMessage = /请先登录|登录已过期|请重新登录|未登录/
+const loginPage = /请先登录|登录已过期|请重新登录|超星通行证/
+
+async function getChaoxingText(http: ChaoxingHttpClient, url: string, cookie?: string, referer?: string) {
+  const headers: Record<string, string> = {}
+  if (cookie) headers.Cookie = cookie
+  if (referer) headers.Referer = referer
+  const response = await http.get(url, { headers, timeoutMs: 8000 })
+  const { status } = response
+  if (status === 403 || status === 429) throw new ChaoxingRiskError(status)
+  if (status === 401 || (status >= 300 && status < 400) || isChaoxingLoginUrl(response.url)) {
+    throw new ChaoxingAuthError()
+  }
+  if (status < 200 || status >= 300 || (response.url && new URL(response.url).origin !== new URL(url).origin)) {
+    throw new Error('Chaoxing HTTP request failed')
+  }
+  return response.data
+}
+
+async function getChaoxingJson(http: ChaoxingHttpClient, url: string, cookie?: string, referer?: string) {
+  const body = await getChaoxingText(http, url, cookie, referer)
+  let raw: any
+  try {
+    raw = JSON.parse(body)
+  } catch {
+    if (loginPage.test(body)) throw new ChaoxingAuthError()
+    throw new ChaoxingParseError('Expected course JSON')
+  }
+  if (loginMessage.test(field(raw?.msg ?? raw?.message))) throw new ChaoxingAuthError()
+  return raw
+}
+
+export async function fetchChaoxingCoursesFast(http: ChaoxingHttpClient): Promise<(ChaoxingCourse & CourseNames)[]> {
+  const cookie = await http.getCookies?.(ORIGIN + '/')
+  const raw = await getChaoxingJson(http, ORIGIN + '/mycourse/backclazzdata?view=json&mcode=', cookie, CHAOXING_WORK_URL)
+  return readCourseList(raw)
+}
+
+export async function fetchChaoxingActivitiesFast(
+  http: ChaoxingHttpClient, ignoredCourses: string[] = [], options?: CourseBatchOptions
+): Promise<ChaoxingActivitiesResult> {
+  const courses = await fetchChaoxingCoursesFast(http)
+  const selected = filterByIgnoredCourses(courses, ignoredCourses, getCourseNames)
+  const cookie = selected.length ? await http.getCookies?.(MOBILE_ORIGIN + '/') : undefined
+  const batches = await runConcurrentBatches(selected, async (course) => {
+    const url = activityListUrl(course, { _: String(Date.now()) })
+    const raw = await getChaoxingJson(http, url, cookie, MOBILE_ORIGIN + '/')
+    return readCourseActivities(raw, course)
+  }, options)
+  return { loggedIn: true, courses, activities: batches.flat(), fetchedAt: new Date().toISOString() }
+}
+
+function readProgressPage(html: string) {
+  const text = html.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, '')
+    .replace(/<[^>]+>/g, '').replace(/&nbsp;|&#160;/gi, ' ')
+  if (loginPage.test(text)) throw new ChaoxingAuthError()
+  const counts = /(?:已完成|任务点完成数)\s*[：:]?\s*(\d+)\s*(?:个)?\s*[/／]\s*(\d+)/.exec(text)
+  if (counts) return { counts: counts.slice(1) }
+
+  const input = html.match(/<input\b(?=[^>]*\s(?:id|name)\s*=\s*(?:"pEnc"|'pEnc'|pEnc(?=[\s>])))[^>]*>/i)?.[0]
+  const value = input?.match(/\svalue\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i)
+  const assignment = /\bpEnc['"]?\s*[:=]\s*['"]([^'"]+)['"]/.exec(html)
+  return { pEnc: field(value?.[1] ?? value?.[2] ?? value?.[3]) || field(assignment?.[1]) }
+}
+
+export async function fetchChaoxingProgressFast(
+  http: ChaoxingHttpClient, ignoredCourses: string[] = [], options?: CourseBatchOptions
+): Promise<ChaoxingProgressResult> {
+  const courses = await fetchChaoxingCoursesFast(http)
+  const selected = filterByIgnoredCourses(courses, ignoredCourses, getCourseNames)
+  const cookie = selected.length ? await http.getCookies?.(STATS_ORIGIN + '/') : undefined
+  const progress = await runConcurrentBatches(selected, async (course, checkActive) => {
+    const params = progressParams(course)
+    const url = courseUrl(STATS_ORIGIN, '/study-data/index', params)
+    let pEnc = course.pEnc
+    if (!pEnc) {
+      const indexUrl = course.enc ? url + '&' + new URLSearchParams({ stuenc: course.enc }) : url
+      const page = readProgressPage(await getChaoxingText(http, indexUrl, cookie))
+      if (page.counts) return normalizeProgress(course, url, page.counts)
+      pEnc = page.pEnc
+    }
+    if (!pEnc) throw new ChaoxingParseError('Missing Chaoxing task counts or pEnc')
+    checkActive()
+    const jobUrl = courseUrl(STATS_ORIGIN, '/stat2/study-data/job', { ...params, pEnc })
+    return normalizeProgress(course, url, readJobCounts(await getChaoxingJson(http, jobUrl, cookie, url)))
+  }, options)
   return { loggedIn: true, courses, progress, fetchedAt: new Date().toISOString() }
 }

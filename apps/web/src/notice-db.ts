@@ -6,8 +6,13 @@
 import type { NoticeBody, NoticeItem } from './types'
 
 export const NOTICE_DB_NAME = 'haust_notices_v1'
-export const NOTICE_DB_VERSION = 1
+export const NOTICE_DB_VERSION = 2
 export const NOTICE_MAX_ITEMS = 300
+const NOTICE_BODY_VERSION = 2
+
+export function compactNoticeTitle(title: string): string {
+  return title.normalize('NFKC').toLowerCase().replace(/[\p{P}\s\u200b-\u200d]/gu, '')
+}
 
 export class WebVpnAuthError extends Error {
   readonly code = 'WEBVPN_AUTH_REQUIRED'
@@ -162,8 +167,31 @@ type StoredNotice = NoticeItem & {
 
 type StoredBody = {
   key: string
+  bodyVersion: number
+  expectedTitle: string
   body: NoticeBody
   cachedAt: number
+}
+
+function matchesBodyTitle(expectedTitle: string, actualTitle: string | undefined): boolean {
+  const expected = compactNoticeTitle(expectedTitle)
+  const actual = compactNoticeTitle(actualTitle ?? '')
+  return !expected || !actual || expected === actual
+}
+
+function isUsableBody(body: NoticeBody | undefined, expectedTitle: string): body is NoticeBody {
+  if (!body || body.failure || body.error || ('articleMatch' in body && body.articleMatch !== true)) return false
+  if (typeof body.text !== 'string' || (body.title != null && typeof body.title !== 'string')) return false
+  if (body.imgs != null && (!Array.isArray(body.imgs) || !body.imgs.every((url) => typeof url === 'string' && url.trim()))) return false
+  if (body.attachments != null && (!Array.isArray(body.attachments) ||
+      !body.attachments.every((file) => typeof file?.url === 'string' && file.url.trim() && typeof file.name === 'string'))) return false
+  return !!(body.text.trim() || body.imgs?.length || body.attachments?.length) && matchesBodyTitle(expectedTitle, body.title)
+}
+
+function readBodyRecord(record: StoredBody | undefined, expectedTitle: string): NoticeBody | null {
+  if (record?.bodyVersion !== NOTICE_BODY_VERSION || typeof record.expectedTitle !== 'string') return null
+  return matchesBodyTitle(expectedTitle, record.expectedTitle) && isUsableBody(record.body, expectedTitle) &&
+    matchesBodyTitle(record.expectedTitle, record.body.title) ? record.body : null
 }
 
 // ── IndexedDB 封装（带无 IDB 环境的内存降级） ─────────────────────────────
@@ -178,7 +206,7 @@ function openNoticeDb(): Promise<IDBDatabase | null> {
   dbPromise = new Promise((resolve) => {
     try {
       const req = indexedDB.open(NOTICE_DB_NAME, NOTICE_DB_VERSION)
-      req.onupgradeneeded = () => {
+      req.onupgradeneeded = (event) => {
         const db = req.result
         if (!db.objectStoreNames.contains('notices')) {
           const store = db.createObjectStore('notices', { keyPath: 'key' })
@@ -186,9 +214,18 @@ function openNoticeDb(): Promise<IDBDatabase | null> {
         }
         if (!db.objectStoreNames.contains('bodies')) {
           db.createObjectStore('bodies', { keyPath: 'key' })
+        } else if (event.oldVersion < 2) {
+          req.transaction!.objectStore('bodies').clear()
         }
       }
-      req.onsuccess = () => resolve(req.result)
+      req.onsuccess = () => {
+        const db = req.result
+        db.onversionchange = () => {
+          db.close()
+          dbPromise = null
+        }
+        resolve(db)
+      }
       req.onerror = () => resolve(null)
     } catch (_) {
       resolve(null)
@@ -290,14 +327,24 @@ export async function getCachedNoticeBody(item: Pick<NoticeItem, 'source' | 'id'
   const key = normalizeNoticeKey(item)
   const db = await openNoticeDb()
   if (!db) {
-    return memBodies.get(key)?.body ?? null
+    const body = readBodyRecord(memBodies.get(key), item.title)
+    if (!body) memBodies.delete(key)
+    return body
   }
   return new Promise((resolve) => {
     try {
-      const tx = db.transaction('bodies', 'readonly')
-      const req = tx.objectStore('bodies').get(key)
-      req.onsuccess = () => resolve((req.result as StoredBody | undefined)?.body ?? null)
-      req.onerror = () => resolve(null)
+      // Validate and evict in one transaction so a concurrent save cannot be deleted.
+      const tx = db.transaction('bodies', 'readwrite')
+      const store = tx.objectStore('bodies')
+      const req = store.get(key)
+      let body: NoticeBody | null = null
+      req.onsuccess = () => {
+        body = readBodyRecord(req.result, item.title)
+        if (req.result && !body) store.delete(key)
+      }
+      tx.oncomplete = () => resolve(body)
+      tx.onerror = () => resolve(null)
+      tx.onabort = () => resolve(null)
     } catch (_) {
       resolve(null)
     }
@@ -308,9 +355,9 @@ export async function saveNoticeBody(
   item: Pick<NoticeItem, 'source' | 'id' | 'url' | 'title'>,
   body: NoticeBody
 ): Promise<void> {
-  if (!body || body.failure || (!body.text && !body.imgs?.length && !body.attachments?.length)) return
+  if (!isUsableBody(body, item.title)) return
   const key = normalizeNoticeKey(item)
-  const record: StoredBody = { key, body, cachedAt: Date.now() }
+  const record: StoredBody = { key, bodyVersion: NOTICE_BODY_VERSION, expectedTitle: item.title, body, cachedAt: Date.now() }
   const db = await openNoticeDb()
   if (!db) {
     memBodies.set(key, record)

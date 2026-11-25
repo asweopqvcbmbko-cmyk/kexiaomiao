@@ -14,6 +14,7 @@ import { CapacitorHttp, ExceptionCode, registerPlugin } from '@capacitor/core'
 import { retireStudyData } from './retired-study-data'
 import { createAirconElectricityService } from './lib/aircon-electricity'
 import type { NoticeHttpClient } from './lib/notices'
+import type { ChaoxingHttpClient } from './lib/chaoxing'
 import {
   authDelay, authPageScript, AuthFlowError, classifyAuthError, classifyAuthRisk,
   driveAuth, failAuth, inspectAuthPage, waitForAuthInput, type AuthBrowser
@@ -53,9 +54,81 @@ const noticeHttp: NoticeHttpClient = {
     })
     return {
       status: response.status, url: response.url || url,
+      headers: response.headers || {},
       data: typeof response.data === 'string' ? response.data : JSON.stringify(response.data) ?? ''
     }
   }
+}
+
+async function readChaoxingCookies(url: string): Promise<string> {
+  const target = new URL(url)
+  if (target.protocol !== 'https:' || !(target.hostname === 'chaoxing.com' || target.hostname.endsWith('.chaoxing.com'))) return ''
+  return (await browser.cookies({ url })).cookies || ''
+}
+
+const chaoxingHttp: ChaoxingHttpClient = {
+  getCookies: readChaoxingCookies,
+  async get(url, { headers = {}, timeoutMs = 8000 } = {}) {
+    const requestHeaders: Record<string, string> = { ...headers, 'User-Agent': NOTICE_UA }
+    if (!Object.keys(headers).some((name) => name.toLowerCase() === 'cookie')) {
+      const cookie = await readChaoxingCookies(url)
+      if (cookie) requestHeaders.Cookie = cookie
+    }
+    const response = await CapacitorHttp.get({
+      url, headers: requestHeaders, connectTimeout: timeoutMs, readTimeout: timeoutMs, disableRedirects: false
+    })
+    return {
+      status: response.status, url: response.url || url,
+      data: typeof response.data === 'string' ? response.data : JSON.stringify(response.data) ?? ''
+    }
+  }
+}
+
+const MAX_NOTICE_IMAGE_BASE64_LEN = 5_600_000 // ~4.2 MB raw binary
+
+async function fetchNoticeImageDataUrl(rawUrl: string, referer?: string): Promise<string | null> {
+  const input = String(rawUrl || '').trim()
+  if (!input) return null
+  let parsed: URL
+  try {
+    parsed = new URL(input)
+  } catch {
+    return null
+  }
+  if (parsed.protocol !== 'https:' || !parsed.hostname.endsWith('.haust.edu.cn')) return null
+
+  const altUrl = /-haust-edu-cn-s\.haust\.edu\.cn$/i.test(parsed.hostname)
+    ? notices.toDirectUrl(input)
+    : notices.toWebVpnUrl(input)
+  const candidates = [...new Set([input, altUrl].filter(Boolean))]
+
+  for (const targetUrl of candidates) {
+    try {
+      const headers: Record<string, string> = { 'User-Agent': NOTICE_UA, Accept: 'image/*,*/*;q=0.8' }
+      const cookie = await readNoticeCookies(targetUrl).catch(() => '')
+      if (cookie) headers.Cookie = cookie
+      if (referer && /^https:\/\//i.test(referer)) headers.Referer = referer
+      const response = await CapacitorHttp.get({
+        url: targetUrl,
+        headers,
+        responseType: 'blob',
+        connectTimeout: 8000,
+        readTimeout: 10000,
+        disableRedirects: false
+      })
+      if (response.status < 200 || response.status >= 300) continue
+      const resHeaders = response.headers || {}
+      const ctKey = Object.keys(resHeaders).find((k) => k.toLowerCase() === 'content-type')
+      const contentType = String(ctKey ? resHeaders[ctKey] : '').split(';')[0].trim().toLowerCase()
+      if (!contentType.startsWith('image/')) continue
+      const base64 = typeof response.data === 'string' ? response.data.trim() : ''
+      if (!base64 || base64.length > MAX_NOTICE_IMAGE_BASE64_LEN) continue
+      return base64.startsWith('data:') ? base64 : `data:${contentType};base64,${base64}`
+    } catch {
+      // Try next candidate URL.
+    }
+  }
+  return null
 }
 
 const HOME = 'https://jwgl-haust-edu-cn-s.haust.edu.cn/eams/homeExt.action'
@@ -787,15 +860,34 @@ function cachedChaoxingCourses<T extends ChaoxingActivitiesResult | ChaoxingProg
   key: string,
   ignoredCourses: string[],
   empty: T,
-  fetchResult: () => Promise<T>,
+  fetchFast: () => Promise<T>,
+  fetchFallback: () => Promise<T>,
   filterResult: (result: T, ignored: string[]) => T
 ): Promise<T> {
   const version = chaoxingCacheVersion
-  return single(JSON.stringify([key, version, ignoredCourses]), () => withEngine(async () => {
+  return single(JSON.stringify([key, version, ignoredCourses]), async () => {
     if (version !== chaoxingCacheVersion) return empty
     try {
       await prepareStudyData()
-      const result = await fetchWithChaoxingRelogin(fetchResult, version)
+      if (version !== chaoxingCacheVersion) return empty
+      let result: T | undefined
+      try {
+        result = await fetchFast()
+      } catch (fastError) {
+        if (fastError instanceof chaoxing.ChaoxingRiskError) throw fastError
+        if (fastError instanceof chaoxing.ChaoxingAuthError) {
+          const recovered = await single('chaoxing:relogin:' + version, () =>
+            withEngine(() => version === chaoxingCacheVersion ? silentReloginChaoxing() : Promise.resolve(false))
+          )
+          if (!recovered || version !== chaoxingCacheVersion) throw fastError
+          result = await fetchFast()
+        } else {
+          result = await withEngine(async () => {
+            if (version !== chaoxingCacheVersion) return empty
+            return fetchWithChaoxingRelogin(fetchFallback, version)
+          })
+        }
+      }
       if (version !== chaoxingCacheVersion) return empty
       if (result.authRequired) throw new chaoxing.ChaoxingAuthError()
       // Course access parameters are needed only during the live request.
@@ -812,7 +904,7 @@ function cachedChaoxingCourses<T extends ChaoxingActivitiesResult | ChaoxingProg
         error: authRequired ? undefined : error instanceof chaoxing.ChaoxingParseError ? 'parse' : 'network'
       }
     }
-  }))
+  })
 }
 
 function prepareStudyData() {
@@ -941,6 +1033,7 @@ export const androidApi = {
   }),
   chaoxingActivities: (ignoredCourses: string[] = []): Promise<ChaoxingActivitiesResult> => cachedChaoxingCourses(
     'chaoxing.activities', ignoredCourses, { loggedIn: false, courses: [], activities: [], fetchedAt: new Date().toISOString() },
+    () => chaoxing.fetchChaoxingActivitiesFast(chaoxingHttp, ignoredCourses),
     () => chaoxing.fetchChaoxingActivities(engine, ignoredCourses),
     (result, ignored) => ({
       ...result, activities: chaoxing.filterCachedCourseRows(result.activities, result.courses, ignored)
@@ -948,6 +1041,7 @@ export const androidApi = {
   ),
   chaoxingProgress: (ignoredCourses: string[] = []): Promise<ChaoxingProgressResult> => cachedChaoxingCourses(
     'chaoxing.progress', ignoredCourses, { loggedIn: false, courses: [], progress: [], fetchedAt: new Date().toISOString() },
+    () => chaoxing.fetchChaoxingProgressFast(chaoxingHttp, ignoredCourses),
     () => chaoxing.fetchChaoxingProgress(engine, ignoredCourses),
     (result, ignored) => ({
       ...result, progress: chaoxing.filterCachedCourseRows(result.progress, result.courses, ignored)
@@ -1192,6 +1286,8 @@ export const androidApi = {
     checkNoticeSession(version)
     return body
   },
+
+  fetchNoticeImage: fetchNoticeImageDataUrl,
 
   refreshCard: () =>
     single('card', () =>

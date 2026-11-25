@@ -1,5 +1,5 @@
 // @ts-nocheck —— 从桌面端逐行移植并增强的纯逻辑模块（支持双网 ID 归一化 + 第 1 页增量截断）。
-import { WebVpnAuthError, normalizeNoticeItem } from '../../notice-db.ts'
+import { WebVpnAuthError, compactNoticeTitle, normalizeNoticeItem } from '../../notice-db.ts'
 import { getSubscribedCollegeSources, isCollegeSource, type CollegeSource } from '../../college-notices.ts'
 import type { NoticeBody, NoticeItem } from '../../types'
 
@@ -23,7 +23,7 @@ const PORTAL_COLUMNS = [
 ]
 const PORTAL_COLUMNS_JSON = JSON.stringify(PORTAL_COLUMNS)
 
-export type NoticeHttpResponse = { status: number; url: string; data: string }
+export type NoticeHttpResponse = { status: number; url: string; data: string; headers?: Record<string, string> }
 export type NoticeHttpClient = {
   get(url: string, opts?: { headers?: Record<string, string>; timeoutMs?: number }): Promise<NoticeHttpResponse>
   getCookies?(url: string): Promise<string>
@@ -187,72 +187,12 @@ function buildCollegeListJs(college: CollegeSource) {
 })()`
 }
 
-const BODY_JS = String.raw`((expectedTitle, expectedId, publicCollege) => {
-  const norm = (s) => (s || '').replace(/\s+/g, ' ').trim();
-  const el =
-    document.querySelector('[id^=vsb_content]') ||
-    document.querySelector('.v_news_content') ||
-    document.querySelector('.article-content') ||
-    document.querySelector('form[name="_newscontent_fromname"]') ||
-    document.querySelector('article') ||
-    document.querySelector('main') ||
-    document.querySelector('.content');
-  const h2t = (node) => {
-    const h = node.innerHTML
-      .replace(/<(script|style)[\s\S]*?<\/\1>/gi, '')
-      .replace(/<\/(p|div|li|h[1-6]|tr|table|section)>/gi, '\n')
-      .replace(/<br\s*\/?>/gi, '\n')
-      .replace(/<[^>]+>/g, '');
-    const ta = document.createElement('textarea');
-    ta.innerHTML = h;
-    return ta.value.replace(/[ \t\u00a0]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
-  };
-  const imgs = [...(el || document).querySelectorAll('img')]
-    .map((i) => i.getAttribute('src'))
-    .filter(Boolean)
-    .map((s) => {
-      try { return new URL(s, location.href).href; } catch (_) { return ''; }
-    })
-    .filter(Boolean);
-  const attachments = [...(el || document).querySelectorAll('a[href]')]
-    .map((a) => {
-      const href = a.getAttribute('href') || '';
-      if (!href || /^(javascript:|mailto:|tel:|#)/i.test(href)) return null;
-      const isFile = /\.(pdf|docx?|xlsx?|pptx?|zip|rar|7z|wps)(?:[?#]|$)/i.test(href) || /download\.jsp|\/_upload\/|attach/i.test(href);
-      if (!isFile) return null;
-      try {
-        return { name: norm(a.textContent || a.title || '附件'), url: new URL(href, location.href).href };
-      } catch (_) { return null; }
-    })
-    .filter(Boolean);
-  const dm = (document.body.innerText || '').match(/20\d\d年\d{1,2}月\d{1,2}日|20\d\d-\d{2}-\d{2}/);
-  const url = location.href;
-  const pageText = norm((document.body && document.body.innerText) || '');
-  const loginUrl = /\/login|\/cas\//i.test(location.pathname) || /passport|sso/i.test(location.hostname);
-  const loginText = /统一身份认证|统一认证|VPN登录|VPN 登录|用户登录|请先登录|登录后查看/.test(pageText);
-  const pageTitle = norm((el && el.querySelector('h1,h2,.tit,.title'))?.textContent || document.title);
-  const compact = (s) => norm(s).replace(/[《》【】\[\]（）()“”"'：:，,。.!！?？\s]/g, '');
-  const targetTitle = compact(expectedTitle);
-  const actualTitle = compact(pageTitle);
-  const idInUrl = expectedId && new RegExp('(?:wbnewsid=|/|id=)' + expectedId + '(?:\\D|$)').test(url);
-  const titleMatch = !!targetTitle && !!actualTitle &&
-    (actualTitle === targetTitle || actualTitle.includes(targetTitle) || targetTitle.includes(actualTitle));
-  const content = el ? h2t(el) : '';
-  const contentImages = imgs.length > 0;
-  const matchesArticle = !!(idInUrl || titleMatch) && !!(content || contentImages || attachments.length > 0);
-  const login = loginUrl || (loginText && !(publicCollege && matchesArticle));
-  const articleMatch = !login && matchesArticle;
-  return JSON.stringify({
-    title: pageTitle,
-    text: content,
-    imgs: imgs,
-    attachments: attachments,
-    date: dm ? dm[0] : '',
-    url,
-    pageType: login ? 'login' : articleMatch ? 'article' : el ? 'content-unmatched' : 'page',
-    articleMatch
-  });
-})`;
+function bodyScript(options: NoticeArticleIdentity) {
+  // Evaluate the same extractor on the live DOM after WebView rendering.
+  const helpers = [compactNoticeTitle, isDecorativeNoticeImage, asHttpsUrl, isLoginLandingUrl, noticeDate]
+  return 'JSON.stringify((' + extractNoticeBody + ')((' + noticeDomTree + ')(document.documentElement), location.href, ' +
+    JSON.stringify(options) + ', ' + helpers.map((helper) => '(' + helper + ')').join(', ') + '))'
+}
 
 function safeDomain(url) {
   try { return new URL(url).hostname } catch (_) { return '' }
@@ -327,8 +267,13 @@ function normalizeBodyResources(data, preferVpn) {
   return { ...data, imgs, attachments }
 }
 
-function isLoginLandingUrl(url) {
-  return /\/cas\/login|vpn\.haust\.edu\.cn\/portal|loginExt|passport|auth\.htm/i.test(String(url || ''))
+function isLoginLandingUrl(value: string) {
+  try {
+    const { hostname, pathname } = new URL(value)
+    return /^(?:cas|sso|passport\d*)(?:[.-]|$)/i.test(hostname) ||
+      (hostname === 'vpn.haust.edu.cn' && /^\/(?:portal(?:[/.-]|$)|$)/i.test(pathname)) ||
+      /\/(?:login(?:Ext)?|cas|auth\.htm)(?:[/._-]|$)/i.test(pathname)
+  } catch { return false }
 }
 
 async function fetchList(engine, options: NoticeListOptions = {}, http?: NoticeHttpClient) {
@@ -473,22 +418,19 @@ async function fetchBody(engine, item, http?: NoticeHttpClient) {
   if (http) return fetchBodyFast(http, item)
   const diagnostics = []
   const publicCollege = isCollegeSource(item.source)
-  const rawId = String(item.id || '')
-  const expectedId = (publicCollege ? rawId.replace(/^\d+_/, '') : rawId).replace(/[^0-9]/g, '')
+  const expectedId = String(item.id || '').replace(/^\d+_/, '')
   const expectedTitle = String(item.title || '')
-  const capture = async () => {
-    const js = `${BODY_JS}(${JSON.stringify(expectedTitle)}, ${JSON.stringify(expectedId)}, ${publicCollege})`
-    const raw = await engine.run(js)
-    return typeof raw === 'string' ? JSON.parse(raw) : raw
-  }
-  const waitForArticleOrLogin = async (timeoutMs = 22000) => {
+  const waitForArticleOrLogin = async (mirrored = false, timeoutMs = 2500) => {
+    const script = bodyScript({
+      expectedTitle, expectedId: mirrored ? '' : expectedId, expectedUrl: mirrored ? '' : item.url
+    })
     const deadline = Date.now() + timeoutMs
     let last = null
-    while (Date.now() < deadline) {
-      last = await capture().catch(() => null)
-      if (last?.pageType === 'login' || last?.pageType === 'article') return last
+    do {
+      last = await engine.run(script).then((raw) => typeof raw === 'string' ? JSON.parse(raw) : raw).catch(() => null)
+      if (['login', 'article', 'content-unmatched'].includes(last?.pageType)) return last
       await new Promise((r) => setTimeout(r, 350))
-    }
+    } while (Date.now() < deadline)
     return last
   }
   const attempt = async (url, sourceKind, loadTimeoutMs = 30000, referer = '') => {
@@ -502,13 +444,12 @@ async function fetchBody(engine, item, http?: NoticeHttpClient) {
         diagnostics.push({ domain: safeDomain(landed), pageType: 'login', result: 'authentication-required' })
         return { failure: 'auth', error: '请先登录科大 VPN 后查看这条通知。', pageType: 'login' }
       }
-      const data = await waitForArticleOrLogin(loadTimeoutMs < 15000 ? 10000 : 22000)
+      const data = await waitForArticleOrLogin(sourceKind === 'school-mirror', loadTimeoutMs < 15000 ? 6000 : 12000)
       if (data?.pageType === 'login') {
         diagnostics.push({ domain: safeDomain(data.url || landed), pageType: 'login', result: 'authentication-required' })
         return { failure: 'auth', error: '请先登录科大 VPN 后查看这条通知。', pageType: 'login' }
       }
-      const matchedOriginal = item.source !== 'jwc' && (data?.text || data?.imgs?.length || data?.attachments?.length)
-      if ((data?.pageType === 'article' && data.articleMatch) || matchedOriginal) {
+      if (data?.pageType === 'article' && data.articleMatch) {
         const usedVpn = isWebVpnHost(safeDomain(data.url || landed)) || isWebVpnHost(safeDomain(url))
         diagnostics.push({ domain: safeDomain(data.url || landed), pageType: 'article', result: 'matched' })
         return { ...normalizeBodyResources(data, usedVpn), sourceKind, diagnostics }
@@ -599,7 +540,6 @@ type HtmlNode = {
   parent?: HtmlNode
 }
 
-const HTML_IGNORED = new Set(['script', 'style', 'noscript', 'template'])
 const HTML_VOID = new Set('area base br col embed hr img input link meta param source track wbr'.split(' '))
 const HTML_BLOCK = new Set('br p div li h1 h2 h3 h4 h5 h6 tr table section article'.split(' '))
 const htmlSpace = (value = '') => value.replace(/\s+/g, ' ').trim()
@@ -618,23 +558,26 @@ function decodeHtml(value: string): string {
   })
 }
 
-function parseHtml(html: string): HtmlNode {
+function noticeDomTree(element: Element): HtmlNode {
   const root: HtmlNode = { tag: '#document', attrs: {}, children: [] }
-  if (typeof DOMParser !== 'undefined') {
-    const appendDom = (parent: HtmlNode, dom: Node) => {
-      if (dom.nodeType === 3) parent.children.push(dom.nodeValue || '')
-      if (dom.nodeType !== 1) return
-      const element = dom as Element
-      const tag = element.localName
-      if (HTML_IGNORED.has(tag)) return
-      const attrs = Object.fromEntries(Array.from(element.attributes, ({ name, value }) => [name, value]))
-      const node: HtmlNode = { tag, attrs, children: [], parent }
-      parent.children.push(node)
-      for (const child of element.childNodes) appendDom(node, child)
-    }
-    appendDom(root, new DOMParser().parseFromString(html, 'text/html').documentElement)
-    return root
+  const append = (parent: HtmlNode, dom: Node) => {
+    if (dom.nodeType === 3) parent.children.push(dom.nodeValue || '')
+    if (dom.nodeType !== 1) return
+    const element = dom as Element
+    const tag = element.localName
+    if (/^(?:script|style|noscript|template)$/.test(tag)) return
+    const attrs = Object.fromEntries(Array.from(element.attributes, ({ name, value }) => [name, value]))
+    const node: HtmlNode = { tag, attrs, children: [], parent }
+    parent.children.push(node)
+    for (const child of element.childNodes) append(node, child)
   }
+  if (element) append(root, element)
+  return root
+}
+
+function parseHtml(html: string): HtmlNode {
+  if (typeof DOMParser !== 'undefined') return noticeDomTree(new DOMParser().parseFromString(html, 'text/html').documentElement)
+  const root: HtmlNode = { tag: '#document', attrs: {}, children: [] }
 
   // VSB fixtures in Node need only text, attributes and ancestry. Never execute markup.
   const stack = [root]
@@ -757,73 +700,196 @@ function isLoginHtml(url: string, nodes: HtmlNode[], text: string, article = fal
   return !article && /统一身份认证|统一认证|VPN\s*登录|用户登录|请先登录|登录后查看/.test(text)
 }
 
-const articleSelectors = [
-  (node: HtmlNode) => node.attrs.id?.startsWith('vsb_content'),
-  (node: HtmlNode) => hasClass(node, 'v_news_content'),
-  (node: HtmlNode) => hasClass(node, 'article-content'),
-  (node: HtmlNode) => node.tag === 'form' && node.attrs.name === '_newscontent_fromname',
-  (node: HtmlNode) => node.tag === 'article',
-  (node: HtmlNode) => node.tag === 'main',
-  (node: HtmlNode) => hasClass(node, 'content')
-]
+export function isDecorativeNoticeImage(url: string, attrs: Record<string, string> = {}): boolean {
+  const label = [attrs.alt, attrs.class, attrs.id, attrs.title].join(' ')
+  if (/logo|banner|carousel|swiper|轮播|校徽|二维码|qrcode/i.test(label) ||
+      /(?:^|[\s_-])(?:icon|ewm|spacer)(?:[\s_-]|$)/i.test(label)) return true
+  const size = (value = '') => /^\s*\d+(?:px)?\s*$/i.test(value) ? parseInt(value, 10) : NaN
+  const width = size(attrs.width) || size(attrs.style?.match(/(?:^|;)\s*width\s*:\s*(\d+px)/i)?.[1])
+  const height = size(attrs.height) || size(attrs.style?.match(/(?:^|;)\s*height\s*:\s*(\d+px)/i)?.[1])
+  if (width <= 2 || height <= 2 || (width <= 32 && height <= 32)) return true
 
-function hasClass(node: HtmlNode, name: string): boolean {
-  return node.attrs.class?.split(/\s+/).includes(name) ?? false
+  let path: string
+  try {
+    path = new URL(url).pathname.toLowerCase()
+    try { path = decodeURIComponent(path) } catch { /* Keep the encoded path. */ }
+  } catch { return true }
+  if (/\/(?:_upload|__local|system\/_content|ueditor|uploads?|attachments?)\//.test(path)) return false
+  return /\/(?:images?|img|assets|dfiles)(?:\/[^/]+)*\/(?:logo|banner|top|head|foot|icon|bg|ewm|qr[-_]?code|xiaohui|pic\d*banner|slide|carousel|nav|menu|blank|spacer|transparent|pixel)/.test(path) ||
+    /\/(?:logo|favicon|banner|carousel|xiaohui|qr[-_]?code|spacer|transparent|blank|pixel)(?:[-_.\d/]|$)/.test(path)
 }
 
-export function parseNoticeBodyHtml(html: string, baseUrl: string,
-  { expectedTitle = '', expectedId = '', publicCollege = false } = {}) {
-  const root = parseHtml(html)
-  const nodes = [...htmlElements(root)]
-  const documentBody = nodes.find((node) => node.tag === 'body') || root
-  const contentIndex = articleSelectors.findIndex((selector) => nodes.some(selector))
-  const content = contentIndex < 0 ? undefined : nodes.find(articleSelectors[contentIndex])
-  const articleNodes = content ? [...htmlElements(content)] : []
-  const heading = (node: HtmlNode) => ['h1', 'h2'].includes(node.tag) || hasClass(node, 'tit') || hasClass(node, 'title')
-  const titles = [...articleNodes.filter(heading), ...nodes.filter((node) => node.tag === 'h1' || node.tag === 'title')]
-    .map((node) => htmlSpace(htmlText(node))).filter(Boolean)
-  const compact = (value: string) => value.replace(/[《》【】\[\]（）()“”"'：:，,。.!！?？\s]/g, '').toLowerCase()
+type NoticeArticleIdentity = { expectedTitle?: string; expectedId?: string; expectedUrl?: string; publicCollege?: boolean }
+
+// Explicit dependencies let the same extractor run in the hidden WebView.
+function extractNoticeBody(
+  root: HtmlNode, baseUrl: string, { expectedTitle = '', expectedId = '', expectedUrl = '' }: NoticeArticleIdentity,
+  compact: typeof compactNoticeTitle, decorative: typeof isDecorativeNoticeImage, resolveUrl: typeof asHttpsUrl,
+  loginUrl: typeof isLoginLandingUrl, readDate: typeof noticeDate
+) {
+  const space = (value: string) => value.replace(/\s+/g, ' ').trim()
+  const hasClass = (node: HtmlNode, name: string) => (node.attrs.class || '').split(/\s+/).includes(name)
+  const chrome = (node: HtmlNode) => /^(?:header|nav|footer|aside)$/.test(node.tag) ||
+    /^(?:navigation|banner|contentinfo)$/.test(node.attrs.role || '') || 'hidden' in node.attrs ||
+    /(?:^|[\s_-])(?:header|nav|footer|banner|slider|swiper|carousel|logo|ewm|qrcode)(?:[\s_-]|\d|$)/i
+      .test([node.attrs.class, node.attrs.id].join(' '))
+  function* elements(node: HtmlNode, forHeadings = false): Generator<HtmlNode> {
+    for (const child of node.children) {
+      if (typeof child === 'string' || (chrome(child) && !(forHeadings && child.tag === 'header' && node.tag === 'article'))) continue
+      yield child
+      yield* elements(child, forHeadings)
+    }
+  }
+  const textOf = (node?: HtmlNode, omit?: HtmlNode): string => {
+    if (!node || node === omit || chrome(node)) return ''
+    const text = node.children.map((child) => typeof child === 'string' ? child : textOf(child, omit)).join('')
+    return /^(?:br|p|div|li|h[1-6]|tr|table|section|article)$/.test(node.tag) ? text + '\n' : text
+  }
+  const nodes = [...elements(root)]
+  const pageText = textOf(nodes.find((node) => node.tag === 'body') || root)
+  const form = (node: HtmlNode) => node.tag === 'form' && node.attrs.name === '_newscontent_fromname'
+  const articleSelectors = [
+    (node: HtmlNode) => /^vsb_content/i.test(node.attrs.id || ''),
+    ...['v_news_content', 'article-content', 'news_con', 'wp_articlecontent'].map((name) =>
+      (node: HtmlNode) => hasClass(node, name)),
+    (node: HtmlNode) => node.tag === 'article',
+    form
+  ]
+  const heading = (node: HtmlNode) => /^(?:h1|h2)$/.test(node.tag) ||
+    ['tit', 'title', 'article-title', 'news_title'].some((name) => hasClass(node, name))
+  const findHeading = (node: HtmlNode) => heading(node) ? node : [...elements(node, true)].find(heading)
+  const candidates = [...new Set(articleSelectors.flatMap((selector) => nodes.filter(selector)))]
+  const containers = candidates.filter((node) => ![...elements(node)].some((child) => candidates.includes(child)))
+
+  const relatedHeading = (content: HtmlNode) => {
+    // VSB and WordPress often put the headline immediately before the rich text.
+    for (let child = content, depth = 0; child.parent && depth < 3; child = child.parent, depth++) {
+      const parent = child.parent
+      if (/^(?:body|html|main|#document)$/.test(parent.tag)) break
+      for (const sibling of parent.children.slice(0, parent.children.indexOf(child)).reverse()) {
+        if (typeof sibling === 'string') continue
+        if (sibling.tag === 'header' && parent.tag === 'article') {
+          const title = [...elements(sibling)].find(heading)
+          if (title) return title
+        }
+        if (chrome(sibling)) continue
+        if (candidates.includes(sibling) || [...elements(sibling)].some((node) => candidates.includes(node))) break
+        const title = findHeading(sibling)
+        if (title) return title
+      }
+      if (form(parent) || parent.tag === 'article') break
+    }
+  }
+
   const targetTitle = compact(expectedTitle)
-  const matchingTitle = titles.find((value) => {
-    const title = compact(value)
-    return title && targetTitle && (title === targetTitle || title.includes(targetTitle) || targetTitle.includes(title))
-  })
-  const landed = asHttpsUrl(baseUrl, baseUrl)
-  const id = expectedId.replace(/^\d+_/, '')
-  const idMatch = landed && /^\d+$/.test(id) && [articleId(landed, true), landed.searchParams.get('id'),
-    landed.pathname.match(/\/(\d+)(?:\.[\w]+)?\/?$/)?.[1]].includes(id)
-  const text = content ? htmlText(content).replace(/[ \t\u00a0]+/g, ' ').replace(/\n\s*\n\s*\n/g, '\n\n').trim() : ''
-  const imgs = [...new Set(articleNodes.filter((node) => node.tag === 'img')
-    .map(({ attrs }) => asHttpsUrl(attrs['data-src'] || attrs.src, baseUrl)?.href).filter(Boolean))]
-  const attachments = new Map<string, { name: string; url: string }>()
-  // VSB may put attachment links next to its rich text container inside the article form.
-  const form = nodes.find(articleSelectors[3])
-  for (const node of form ? htmlElements(form) : articleNodes) {
-    if (node.tag !== 'a') continue
-    const { href, title } = node.attrs
-    if (!href || !/\.(pdf|docx?|xlsx?|pptx?|zip|rar|7z|wps)(?:[?#]|$)|download\.jsp|\/_upload\/|attach/i.test(href)) continue
-    const url = asHttpsUrl(href, baseUrl)?.href
-    if (url) attachments.set(url, { name: htmlSpace(htmlText(node)) || title || '附件', url })
+  const titleMatches = (title: string) => !!targetTitle && compact(title) === targetTitle
+  const documentTitle = space(textOf(nodes.find((node) => node.tag === 'title')))
+  const pageTitle = titleMatches(documentTitle) ? documentTitle :
+    documentTitle.replace(/\s*[-–—_|｜]\s*(?:河南科技大学.*|河科大.*|[^-_|｜]*新闻网|[^-_|｜]*教务处)$/, '')
+  const genericTitle = /^(?:首页|网站首页|校园新闻|全校通知|通知公告|新闻中心|正文|文章详情|河南科技大学(?:[^0-9]{0,24}(?:学院|新闻网|教务处|官网))?)$/
+  const usableTitle = (title: string) => !!compact(title) && (titleMatches(title) || !genericTitle.test(title))
+
+  const landed = resolveUrl(baseUrl, baseUrl)
+  const requested = expectedUrl ? resolveUrl(expectedUrl, expectedUrl) : undefined
+  const urlId = (url?: URL) => {
+    if (!url) return ''
+    const id = url.searchParams.get('wbnewsid') || /\/(\d+)\.s?html?$/i.exec(url.pathname)?.[1] || url.searchParams.get('id')
+    return /^\d+$/.test(id || '') ? id : ''
   }
-  const articleMatch = !!content && !!(matchingTitle || (contentIndex < 5 && idMatch)) &&
-    !!(text || imgs.length || attachments.size)
-  const pageText = htmlText(documentBody)
-  const login = isLoginHtml(baseUrl, nodes, pageText,
-    articleMatch && (publicCollege || !/^(?:请先登录|登录后查看|统一身份认证)/.test(text)))
+  const canonicalHost = (url: URL) => url.hostname.replace(/^([a-z0-9-]+)-haust-edu-cn-s\.haust\.edu\.cn$/i,
+    (_, host: string) => host.replace(/-/g, '.') + '.haust.edu.cn')
+  const requestedId = urlId(requested)
+  const landedId = urlId(landed)
+  const expectedArticleId = requestedId || expectedId.replace(/^\d+_/, '')
+  const sameHost = !!landed && (!requested || canonicalHost(requested) === canonicalHost(landed))
+  const section = (url?: URL) => url?.searchParams.get('wbtreeid') || /\/info\/(\d+)\//i.exec(url?.pathname || '')?.[1]
+  const wrongId = sameHost && !!expectedArticleId && !!landedId && (
+    expectedArticleId !== landedId || (!!section(requested) && !!section(landed) && section(requested) !== section(landed)))
+  const idMatch = sameHost && !wrongId && !!landedId && landedId === expectedArticleId
+  const login = loginUrl(baseUrl) || nodes.some((node) => node.tag === 'input' && node.attrs.type?.toLowerCase() === 'password')
+
+  for (const content of containers) {
+    if (login || wrongId) break
+    const related = relatedHeading(content)
+    const local = findHeading(content)
+    const headline = [related, local].find((node) => usableTitle(space(textOf(node))))
+    const title = headline ? space(textOf(headline)) : containers.length === 1 && usableTitle(pageTitle) ? pageTitle : ''
+    if (!titleMatches(title) && !(containers.length === 1 && idMatch && (!title || !targetTitle))) continue
+
+    const text = textOf(content, local === headline ? local : undefined)
+      .replace(/[ \t\u00a0]+/g, ' ').replace(/\n(?:\s*\n){2,}/g, '\n\n').trim()
+    if (form(content) && !headline && !text) continue
+    const imgs = new Set<string>()
+    const articleNodes = [...elements(content)]
+    for (const { tag, attrs } of articleNodes) {
+      if (tag !== 'img') continue
+      for (const src of [attrs['data-src'], attrs['data-original'], attrs['data-lazy-src'], attrs.src]) {
+        const url = resolveUrl(src, baseUrl)?.href
+        if (!url || decorative(url, attrs)) continue
+        imgs.add(url)
+        break
+      }
+    }
+
+    // VSB may put attachments beside the rich text in the same article form.
+    let scope = content
+    for (let parent = content.parent; parent; parent = parent.parent) {
+      if (!form(parent)) continue
+      if ([...elements(parent)].filter((node) => containers.includes(node)).length === 1) scope = parent
+      break
+    }
+    const attachments = new Map<string, { name: string; url: string }>()
+    for (const node of scope === content ? articleNodes : elements(scope)) {
+      if (node.tag !== 'a') continue
+      const { href, title } = node.attrs
+      const url = resolveUrl(href, baseUrl)
+      if (!url) continue
+      const file = /\.(?:pdf|docx?|xlsx?|pptx?|zip|rar|7z|wps)$/i.test(url.pathname)
+      if (!file && !/\/download\.jsp$|\/(?:attachments?|_upload)\//i.test(url.pathname)) continue
+      if (!file && (/\.(?:png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i.test(url.pathname) || decorative(url.href) ||
+          [...elements(node)].some((child) => child.tag === 'img'))) continue
+      attachments.set(url.href, { name: space(textOf(node)) || title || '附件', url: url.href })
+    }
+    if (!text && !imgs.size && !attachments.size) continue
+    if (/^(?:请先登录|登录后查看|统一身份认证|VPN\s*登录)/.test(text)) break
+    return {
+      title: title || expectedTitle, text, imgs: [...imgs], attachments: [...attachments.values()],
+      date: readDate(pageText), url: baseUrl, pageType: 'article', articleMatch: true
+    }
+  }
+
+  const requiresLogin = login || /统一身份认证|统一认证|VPN\s*登录|用户登录|请先登录|登录后查看/.test(pageText)
   return {
-    title: matchingTitle || titles[0] || '', text, imgs, attachments: [...attachments.values()],
-    date: noticeDate(pageText), url: baseUrl,
-    pageType: login ? 'login' : articleMatch ? 'article' : content ? 'content-unmatched' : 'page',
-    articleMatch: !login && articleMatch
+    title: '', text: '', imgs: [], attachments: [], date: '', url: baseUrl,
+    pageType: requiresLogin ? 'login' : candidates.length ? 'content-unmatched' : 'page',
+    articleMatch: false
   }
+}
+
+export function parseNoticeBodyHtml(html: string, baseUrl: string, identity: NoticeArticleIdentity = {}) {
+  return extractNoticeBody(parseHtml(html), baseUrl, identity, compactNoticeTitle,
+    isDecorativeNoticeImage, asHttpsUrl, isLoginLandingUrl, noticeDate)
 }
 
 type NoticePage = { items: NoticeListItem[]; nextPageUrl?: string }
 type NoticeSource = { id: string; load: () => Promise<NoticeListItem[]> }
 
 const noticeAuthError = () => new WebVpnAuthError('校园网认证已过期，当前显示离线缓存')
-const isAuthResponse = (response: NoticeHttpResponse) =>
-  response.status === 401 || (response.status >= 300 && response.status < 400) || isLoginLandingUrl(response.url)
+const readRedirectLocation = (response: NoticeHttpResponse) => {
+  const headers = response.headers || {}
+  const key = Object.keys(headers).find((k) => k.toLowerCase() === 'location')
+  return key ? String(headers[key] || '') : ''
+}
+const isAuthResponse = (response: NoticeHttpResponse) => {
+  if (response.status === 401 || isLoginLandingUrl(response.url)) return true
+  if (response.status >= 300 && response.status < 400) {
+    const loc = readRedirectLocation(response)
+    // Only treat 3xx as auth failure when Location points to CAS/WebVPN login or is missing on a WebVPN host.
+    if (loc) return isLoginLandingUrl(loc)
+    return isWebVpnHost(safeDomain(response.url))
+  }
+  return false
+}
 const isOkResponse = (response: NoticeHttpResponse) => response.status >= 200 && response.status < 300
 
 export async function fetchListFast(http: NoticeHttpClient, options: NoticeListOptions = {}): Promise<NoticeListResult> {
@@ -954,13 +1020,22 @@ export async function fetchListFast(http: NoticeHttpClient, options: NoticeListO
 
 export async function fetchBodyFast(http: NoticeHttpClient, item: NoticeListItem): Promise<NoticeBody> {
   const publicCollege = isCollegeSource(item.source)
-  const original = publicCollege ? toDirectUrl(item.url) : toWebVpnUrl(item.url)
-  const sourceUrl = asHttpsUrl(original, original)?.href
+  const directCandidate = asHttpsUrl(toDirectUrl(item.url), toDirectUrl(item.url))?.href || ''
+  const vpnCandidate = asHttpsUrl(toWebVpnUrl(item.url), toWebVpnUrl(item.url))?.href || ''
+  // Public college pages & public HAUST news/www sites try fast direct HTTPS first, then fall back to WebVPN.
+  const directHost = safeDomain(directCandidate)
+  const preferDirect = publicCollege || (
+    (item.source === 'school' || item.source === 'news') &&
+    !!directHost && directHost !== 'i.haust.edu.cn' && directHost.endsWith('.haust.edu.cn')
+  )
+  const primaryUrl = preferDirect ? (directCandidate || vpnCandidate) : (vpnCandidate || directCandidate)
+  const secondaryUrl = preferDirect ? (vpnCandidate !== primaryUrl ? vpnCandidate : '') : (directCandidate !== primaryUrl ? directCandidate : '')
+  const sourceUrl = primaryUrl || directCandidate || vpnCandidate
   const networkFailure: NoticeBody = { text: '', failure: 'network', error: '网页加载失败，请检查网络后重试。', sourceUrl }
   const authFailure: NoticeBody = { text: '', failure: 'auth', error: '请先登录科大 VPN 后查看这条通知。', pageType: 'login', sourceUrl }
   if (!sourceUrl) return { text: '', failure: 'parse', error: '通知链接不可用。' }
 
-  const attempt = async (url: string, sourceKind: string, mirrored = false): Promise<NoticeBody> => {
+  const attempt = async (url: string, sourceKind: string, mirrored = false, timeoutOverride?: number): Promise<NoticeBody> => {
     const viaVpn = isWebVpnHost(safeDomain(url))
     const referer = item.source === 'jwc' && !mirrored ? (viaVpn ? JWC_LIST : JWC_LIST_DIRECT)
       : publicCollege ? undefined : PORTAL_URL
@@ -970,31 +1045,43 @@ export async function fetchBodyFast(http: NoticeHttpClient, item: NoticeListItem
         const cookie = await http.getCookies?.(url)
         if (cookie) headers.Cookie = cookie
       }
-      const response = await http.get(url, { headers, timeoutMs: viaVpn ? 8000 : 6000 })
+      const timeoutMs = timeoutOverride ?? (viaVpn ? 7000 : 4500)
+      const response = await http.get(url, { headers, timeoutMs })
       if (isAuthResponse(response)) return authFailure
       if (!isOkResponse(response)) return networkFailure
       const landed = response.url || url
       const body = parseNoticeBodyHtml(response.data, landed, {
-        expectedTitle: item.title, expectedId: mirrored ? '' : item.id, publicCollege
+        expectedTitle: item.title,
+        expectedId: mirrored ? '' : item.id,
+        expectedUrl: mirrored ? '' : item.url,
+        publicCollege
       })
       if (body.pageType === 'login') return authFailure
-      if (body.articleMatch && (!publicCollege || safeDomain(landed) === safeDomain(url))) {
-        return { ...normalizeBodyResources(body, isWebVpnHost(safeDomain(landed))), sourceUrl, sourceKind, mirrored }
+      if (body.articleMatch && (!publicCollege || safeDomain(landed) === safeDomain(url) || isWebVpnHost(safeDomain(landed)))) {
+        return { ...normalizeBodyResources(body, isWebVpnHost(safeDomain(landed))), sourceUrl: url, sourceKind, mirrored }
       }
-      return { text: '', failure: 'parse', error: '未能识别正文。可在应用内打开原文查看。', sourceUrl, pageType: body.pageType }
+      return { text: '', failure: 'parse', error: '未能识别正文。可在应用内打开原文查看。', sourceUrl: url, pageType: body.pageType }
     } catch {
       return networkFailure
     }
   }
 
-  const viaVpn = isWebVpnHost(safeDomain(sourceUrl))
-  const primary = await attempt(sourceUrl, item.source === 'jwc' ? (viaVpn ? 'jwc-webvpn' : 'jwc-direct') : (viaVpn ? 'webvpn' : 'original'))
-  if (!primary.failure || primary.failure === 'auth' || item.source !== 'jwc') return primary
-  const direct = toDirectUrl(sourceUrl)
-  if (direct !== sourceUrl) {
-    const result = await attempt(direct, 'jwc-direct')
-    if (!result.failure || result.failure === 'auth') return result
+  const kindOf = (url: string) => {
+    const viaVpn = isWebVpnHost(safeDomain(url))
+    return item.source === 'jwc' ? (viaVpn ? 'jwc-webvpn' : 'jwc-direct') : (viaVpn ? 'webvpn' : 'original')
   }
+  const primary = await attempt(primaryUrl, kindOf(primaryUrl), false, preferDirect && secondaryUrl ? 3500 : undefined)
+  if (!primary.failure) return primary
+  if (secondaryUrl) {
+    // Even if direct returned network/parse or WebVPN returned auth, try the alternate path before giving up.
+    const shouldTrySecondary = primary.failure !== 'auth' || !isWebVpnHost(safeDomain(secondaryUrl))
+    if (shouldTrySecondary) {
+      const secondary = await attempt(secondaryUrl, kindOf(secondaryUrl))
+      if (!secondary.failure) return secondary
+      if (secondary.failure === 'auth' && primary.failure !== 'auth') return secondary
+    }
+  }
+  if (primary.failure === 'auth' || item.source !== 'jwc') return primary
   const mirror = item.mirrorUrl && toWebVpnUrl(item.mirrorUrl)
   const mirrorUrl = mirror && asHttpsUrl(mirror, mirror)?.href
   if (mirrorUrl) {

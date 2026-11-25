@@ -1,19 +1,19 @@
 {
-    "updatedAt":  "2026-11-25T05:13:05Z",
+    "updatedAt":  "2026-11-25T07:43:52Z",
     "schemaVersion":  1,
     "beta":  {
                  "mirrors":  [
-                                 "https://edgeone.gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2-beta.7/kexiaomiao-v0.2.2-beta.7.apk",
-                                 "https://gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2-beta.7/kexiaomiao-v0.2.2-beta.7.apk"
+                                 "https://edgeone.gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.3-beta.1/kexiaomiao-v0.2.3-beta.1.apk",
+                                 "https://gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.3-beta.1/kexiaomiao-v0.2.3-beta.1.apk"
                              ],
-                 "apkUrl":  "https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2-beta.7/kexiaomiao-v0.2.2-beta.7.apk",
-                 "size":  3398187,
-                 "notes":  "1. 升级为澎湃 4「光感玻璃」悬浮底栏，带高透磨砂、1px 光感折射顶边与平滑滑动胶囊指示器\n2. 禁用 Android 12+ 系统级 WebView 过滚拉伸，彻底修复下拉刷新时的页面与底栏果冻变形\n3. 修复新课程表点击非今日课程卡片无法弹出详情页的 Bug\n4. 新增跨版本更新日志自动聚合能力，跨多代升级也能一次看全所有新增功能",
-                 "publishedAt":  "2026-11-25T05:09:40Z",
-                 "sha256":  "897fb337b1d7c86ad8a420b8ae974007ace4544a9b5d5b41fde99dbe6f6edd9d",
+                 "apkUrl":  "https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.3-beta.1/kexiaomiao-v0.2.3-beta.1.apk",
+                 "size":  3402295,
+                 "notes":  "- 彻底重构通知正文解析与缓存：过滤校徽/轮播等装饰图，IndexedDB 正文缓存升级 v2 并强校验标题一致性（自动清理旧版错乱缓存）\n- 修复通知正文毫秒级读取不稳定问题：修正 3xx 跳转误判，公网新闻/通知支持直连与 WebVPN 自动回退\n- 修复 WebVPN 通知正文图片裂图：新增原生带 Cookie/Referer 图片代理\n- 修复学习通网页版展开软键盘黑屏问题（修正原生 Overlay IME insets 叠加）\n- 学习通课程进度与课堂活动升级为原生 2 路小并发 HTTP（200ms 间隔 + 403/429 熔断保护）并接入 10 分钟 SWR 冷却缓存",
+                 "publishedAt":  "2026-11-25T07:43:52Z",
+                 "sha256":  "437ca7087fdd1b8556096337bed1e8e7b9b5ac5ba5fa9029bd08f2e06e7747f4",
                  "channel":  "beta",
-                 "versionName":  "0.2.2-beta.7",
-                 "versionCode":  23
+                 "versionName":  "0.2.3-beta.1",
+                 "versionCode":  25
              },
     "stable":  {
                    "mirrors":  [
@@ -41,6 +41,12 @@
                           "versionCode":  24,
                           "versionName":  "0.2.2",
                           "notes":  "1. 全面升级无感续登：Android Keystore 本机加密保存教务与学习通凭据，云端更新及多端挤下线后自动后台静默重登\n2. 校园通知重磅升级：覆盖河科大全部 30 个学院/书院（支持多选订阅），升级原生 HTTP 全源并发直连（提速 10–20×），全新极简分组排版\n3. 课程表全面重构：新增 1–20 周快速选周、丝滑日/周切换并记忆偏好、日视图实时上课高亮、周视图一屏自适应智能周末折叠（5/7 列）与当前时间线\n4. 学习通仪表盘优化：修复完整课程名与冷启动快照，低进度优先展示 + 100% 折叠 + 弹性左滑两步忽略旧学期课程\n5. 全新界面美学：澎湃 4「光感玻璃」悬浮底栏、「我的」极光流光 Hero 卡片矩阵、6 步开机 OOBE 互动新手引导（本次升级后可体验一次，不清空数据）\n6. 体验修复：禁用 Android 系统果冻过滚变形，修复跨版本更新日志聚合与默认跟随系统外观"
+                      },
+                      {
+                          "channel":  "beta",
+                          "versionCode":  25,
+                          "versionName":  "0.2.3-beta.1",
+                          "notes":  "- 彻底重构通知正文解析与缓存：过滤校徽/轮播等装饰图，IndexedDB 正文缓存升级 v2 并强校验标题一致性（自动清理旧版错乱缓存）\n- 修复通知正文毫秒级读取不稳定问题：修正 3xx 跳转误判，公网新闻/通知支持直连与 WebVPN 自动回退\n- 修复 WebVPN 通知正文图片裂图：新增原生带 Cookie/Referer 图片代理\n- 修复学习通网页版展开软键盘黑屏问题（修正原生 Overlay IME insets 叠加）\n- 学习通课程进度与课堂活动升级为原生 2 路小并发 HTTP（200ms 间隔 + 403/429 熔断保护）并接入 10 分钟 SWR 冷却缓存"
                       }
                   ]
 }

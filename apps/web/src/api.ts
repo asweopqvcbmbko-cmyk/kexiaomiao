@@ -89,6 +89,8 @@ export const data = {
   tasks: async (_force = false): Promise<TaskData | null> => null,
   card: () => guard<CardInfo | null>(haust()?.refreshCard, null),
   noticeBody: (item: NoticeItem) => guard<NoticeBody | null>(() => (haust()?.noticeBody ? (haust() as Haust).noticeBody(item) : Promise.resolve(null)), null),
+  fetchNoticeImage: (url: string, referer?: string) =>
+    guard<string | null>(() => (haust()?.fetchNoticeImage ? haust()!.fetchNoticeImage!(url, referer) : Promise.resolve(null)), null),
   cached: () => guard<Record<string, unknown> | null>(haust()?.cached, null),
 
   markDone: async (_key: string) => false,

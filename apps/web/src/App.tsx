@@ -113,6 +113,96 @@ function loadAnchor(): { week: number; monday: string } {
   return { week: 10, monday: '2026-11-02' }
 }
 
+function NoticeImage({ src, alt, referer }: { src: string; alt: string; referer?: string }) {
+  const isVpn = /-haust-edu-cn-s\.haust\.edu\.cn/i.test(src)
+  const [resolved, setResolved] = useState<string | null>(() => (isVpn ? null : src))
+  const [failed, setFailed] = useState(false)
+  const retriedRef = useRef(false)
+
+  useEffect(() => {
+    let alive = true
+    retriedRef.current = false
+    setFailed(false)
+    if (!isVpn) {
+      setResolved(src)
+      return () => { alive = false }
+    }
+    setResolved(null)
+    void data.fetchNoticeImage(src, referer).then((dataUrl) => {
+      if (!alive) return
+      if (dataUrl) {
+        setResolved(dataUrl)
+      } else {
+        // Fallback to raw src once before declaring failure (e.g. desktop Electron).
+        retriedRef.current = true
+        setResolved(src)
+      }
+    })
+    return () => { alive = false }
+  }, [src, referer, isVpn])
+
+  const handleError = () => {
+    if (!retriedRef.current) {
+      retriedRef.current = true
+      void data.fetchNoticeImage(src, referer).then((dataUrl) => {
+        if (dataUrl) setResolved(dataUrl)
+        else setFailed(true)
+      })
+      return
+    }
+    setFailed(true)
+  }
+
+  if (failed) {
+    return (
+      <div
+        style={{
+          margin: '10px 0',
+          padding: '10px 12px',
+          borderRadius: 10,
+          background: 'var(--bg-soft, rgba(128,128,128,0.08))',
+          color: 'var(--muted)',
+          fontSize: 12,
+          textAlign: 'center'
+        }}
+      >
+        图片加载失败，可点击下方「打开原文」查看
+      </div>
+    )
+  }
+
+  if (!resolved) {
+    return (
+      <div
+        aria-label="正在加载正文图片"
+        style={{
+          margin: '12px auto',
+          height: 140,
+          borderRadius: 10,
+          background: 'var(--bg-soft, rgba(128,128,128,0.1))',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: 'var(--muted)',
+          fontSize: 12
+        }}
+      >
+        正在加载图片…
+      </div>
+    )
+  }
+
+  return (
+    <img
+      src={resolved}
+      alt={alt}
+      referrerPolicy="no-referrer"
+      onError={handleError}
+      style={{ display: 'block', maxWidth: '100%', height: 'auto', margin: '12px auto', borderRadius: 8 }}
+    />
+  )
+}
+
 export default function App() {
   /* ---------------- 冷启动同步状态判定（杜绝首帧闪烁） ---------------- */
   const [boot] = useState(() => readBootState())
@@ -1225,7 +1315,14 @@ export default function App() {
               {body?.text || (body?.imgs?.length ? '正文以图片形式发布。' : '这条通知没有返回可显示的正文。')}
             </p>
           )}
-          {body?.imgs?.map((src, index) => <img key={`${src}-${index}`} src={src} alt={`${n.title} 正文图片 ${index + 1}`} style={{ display: 'block', maxWidth: '100%', height: 'auto', margin: '12px auto', borderRadius: 8 }} />)}
+          {body?.imgs?.map((src, index) => (
+            <NoticeImage
+              key={`${src}-${index}`}
+              src={src}
+              alt={`${n.title} 正文图片 ${index + 1}`}
+              referer={body?.sourceUrl || n.url}
+            />
+          ))}
           {body?.attachments?.length ? (
             <div className="detailrows" style={{ marginTop: 14 }}>
               {body.attachments.map((att, index) => (

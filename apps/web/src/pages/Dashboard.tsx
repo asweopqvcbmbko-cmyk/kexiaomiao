@@ -12,17 +12,18 @@ import './dashboard-swipe.css'
 type CourseSection = 'activities' | 'progress'
 type Section = 'todo' | 'works' | 'exams' | CourseSection
 const settingsKey = 'haust:chaoxing_settings_v1'
+const COURSE_CACHE_TTL_MS = 10 * 60 * 1000
 const normalizeCourse = (name: string) => name.trim().toLowerCase()
 
 function readSettings(): ChaoxingSettings {
-  const defaults = { ignoredCourses: [], autoLoadActivities: false, autoLoadProgress: false }
+  const defaults = { ignoredCourses: [], autoLoadActivities: true, autoLoadProgress: true }
   try {
     const stored = JSON.parse(localStorage.getItem(settingsKey) || 'null')
     return {
       ignoredCourses: Array.isArray(stored?.ignoredCourses)
         ? stored.ignoredCourses.filter((name: unknown) => typeof name === 'string') : [],
-      autoLoadActivities: stored?.autoLoadActivities === true,
-      autoLoadProgress: stored?.autoLoadProgress === true
+      autoLoadActivities: stored?.autoLoadActivities !== false,
+      autoLoadProgress: stored?.autoLoadProgress !== false
     }
   } catch { return defaults }
 }
@@ -68,29 +69,53 @@ function formatCountdown(minutes: number | null, fallbackText = ''): CountdownBa
   return { main: String(days), unit: '天后', short: `${days} 天后`, level: 'normal' }
 }
 
+function isCourseCacheFresh(result?: ChaoxingActivitiesResult | ChaoxingProgressResult | null) {
+  return !!(result && (result.loggedIn || result.stale) && Date.now() - Date.parse(result.fetchedAt) < COURSE_CACHE_TTL_MS)
+}
+
+function hasUnignoredCourse(excluded: string[], ignored: string[]) {
+  return excluded.some((name) => !ignored.some((value) => normalizeCourse(value) === normalizeCourse(name)))
+}
+
 export function useChaoxingCourseData() {
   const [cache, setCache] = useState(() => data.chaoxingCourseCache())
+  const [initialIgnored] = useState(() => readSettings().ignoredCourses)
   const [phase, setPhase] = useState<Partial<Record<CourseSection, 'loading' | 'done' | 'unsupported'>>>({})
-  const requests = useRef<Partial<Record<CourseSection, object>>>({})
+  const cacheRef = useRef(cache)
+  const requests = useRef<Partial<Record<CourseSection, { latestIgnored?: string[] }>>>({})
   const loaded = useRef<Partial<Record<CourseSection, string[]>>>({})
 
-  const load = useCallback(async (section: CourseSection, ignored: string[], force = false) => {
-    if (requests.current[section]) return
-    const excluded = loaded.current[section]
-    if (!force && excluded && !excluded.some((name) => !ignored.some((value) => normalizeCourse(value) === normalizeCourse(name)))) return
-    const request = requests.current[section] = {}
+  const load = useCallback(async function loadCourseSection(section: CourseSection, ignored: string[], force = false) {
+    const pending = requests.current[section]
+    if (pending) {
+      pending.latestIgnored = ignored
+      return
+    }
+    const excluded = loaded.current[section] ?? initialIgnored
+    if (!force && isCourseCacheFresh(cacheRef.current?.[section]) && !hasUnignoredCourse(excluded, ignored)) return
+    const request: { latestIgnored?: string[] } = {}
+    requests.current[section] = request
     setPhase((prev) => ({ ...prev, [section]: 'loading' }))
     const result = section === 'activities' ? await data.chaoxingActivities(ignored) : await data.chaoxingProgress(ignored)
     if (requests.current[section] !== request) return
     delete requests.current[section]
-    loaded.current[section] = ignored
-    if (result) setCache((prev) => ({ activities: null, progress: null, ...prev, [section]: result }))
+    if (result) {
+      cacheRef.current = { activities: null, progress: null, ...cacheRef.current, [section]: result }
+      setCache(cacheRef.current)
+    }
     setPhase((prev) => ({ ...prev, [section]: result ? 'done' : 'unsupported' }))
-  }, [])
+    if (result?.loggedIn && !result.stale && !result.error && !result.authRequired) {
+      loaded.current[section] = ignored
+      if (request.latestIgnored && hasUnignoredCourse(ignored, request.latestIgnored)) {
+        void loadCourseSection(section, request.latestIgnored)
+      }
+    }
+  }, [initialIgnored])
 
   const reset = useCallback(() => {
     requests.current = {}
     loaded.current = {}
+    cacheRef.current = undefined
     setCache(undefined)
     setPhase({})
   }, [])
@@ -322,9 +347,13 @@ export function Dashboard(props: {
   const canLoad = props.supported && !props.demoMode && loggedIn && !dash?.authRequired && !props.loading
   useEffect(() => {
     if (!canLoad) return
-    if (section === 'activities' || settings.autoLoadActivities) void load('activities', ignored)
-    if (section === 'progress' || settings.autoLoadProgress) void load('progress', ignored)
-  }, [canLoad, section, settings, phase, load, ignored])
+    if (settings.autoLoadActivities) void load('activities', ignored)
+    if (settings.autoLoadProgress) void load('progress', ignored)
+  }, [canLoad, settings.autoLoadActivities, settings.autoLoadProgress, load, ignored])
+
+  useEffect(() => {
+    if (canLoad && (section === 'activities' || section === 'progress')) void load(section, ignored)
+  }, [canLoad, section, load, ignored])
 
   function updateSettings(next: ChaoxingSettings) {
     setSettings(next)
@@ -387,11 +416,10 @@ export function Dashboard(props: {
   const courseSection = section === 'activities' || section === 'progress' ? section : null
   const courseResult = courseSection ? results?.[courseSection] : undefined
   const courseLoading = !!courseSection && !props.demoMode &&
-    (phase[courseSection] === 'loading' || (!phase[courseSection] && canLoad))
+    (phase[courseSection] === 'loading' || (!phase[courseSection] && canLoad && !isCourseCacheFresh(courseResult)))
   const authRequired = courseResult?.authRequired
   const courseError = courseResult?.error
-  const showingCache = !!courseResult && !props.demoMode &&
-    (courseLoading || !courseSection || phase[courseSection] !== 'done' || courseResult.stale)
+  const showingCache = !!(courseResult?.loggedIn || courseResult?.stale)
 
   const pendingWorks = works.filter((w) => w.uncommitted)
   const doneWorks = works.filter((w) => !w.uncommitted)
@@ -674,14 +702,14 @@ export function Dashboard(props: {
             ))}
           </div>
 
-          {/* ── 课程任务 / 课程进度（按需节流加载） ── */}
+          {/* ── 课程任务 / 课程进度 ── */}
           {courseSection ? (
             <>
               {courseLoading && (
                 <div className="sync-banner" role="status">
                   <span className="sync-banner-row">
                     <i className="sync-dot" aria-hidden="true" />
-                    <span>按 500ms 节流拉取{courseSection === 'activities' ? '课程任务' : '课程进度'}中…{showingCache ? '（先展示上次缓存）' : ''}</span>
+                    <span>正在后台更新{courseSection === 'activities' ? '课堂活动' : '课程进度'}…{showingCache ? '（先展示上次缓存）' : ''}</span>
                   </span>
                   <span className="sync-track" aria-hidden="true" />
                 </div>

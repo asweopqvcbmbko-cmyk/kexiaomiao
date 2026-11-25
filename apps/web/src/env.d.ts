@@ -21,6 +21,7 @@ declare global {
       refreshChargers: () => Promise<import('./types').ChargerData>
       refreshCard: () => Promise<import('./types').CardInfo>
       noticeBody: (item: import('./types').NoticeItem) => Promise<import('./types').NoticeBody>
+      fetchNoticeImage?: (url: string, referer?: string) => Promise<string | null>
       cached: () => Promise<{
         courses: import('./types').CourseTable | null
         exams: { exams: import('./types').Exam[]; fetchedAt?: string } | null

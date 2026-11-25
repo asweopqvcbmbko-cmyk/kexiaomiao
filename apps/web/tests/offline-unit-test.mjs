@@ -6,6 +6,7 @@ import {
   fetchListFast,
   fetchBody,
   fetchBodyFast,
+  isDecorativeNoticeImage,
   parseJwcListHtml,
   parseCollegeListHtml,
   parseNoticeBodyHtml,
@@ -31,10 +32,13 @@ import {
   upsertNotices
 } from '../src/notice-db.ts'
 import {
+  ChaoxingRiskError,
   buildChaoxingTodos,
   fetchChaoxingActivities,
+  fetchChaoxingActivitiesFast,
   fetchChaoxingDashboard,
   fetchChaoxingProgress,
+  fetchChaoxingProgressFast,
   filterByIgnoredCourses,
   isChaoxingLoginUrl,
   mergeChaoxingExams,
@@ -284,15 +288,31 @@ async function runTests() {
       collegeLoads.push(url)
       return url
     },
-    run: async (js) => vm.runInNewContext(js, {
-      location: new URL(publicBodyUrl),
-      document: {
-        body: { innerText: '统一身份认证 学院公告正文' },
-        title: '机电工程学院',
-        querySelector: () => ({ innerHTML: '学院公告正文', querySelectorAll: () => [], querySelector: () => null }),
-        createElement: () => ({ set innerHTML(value) { this.value = value } })
-      }
-    })
+    run: async (js) => {
+      const domEl = (tag, attrs = {}, children = []) => ({
+        nodeType: 1,
+        localName: tag,
+        attributes: Object.entries(attrs).map(([name, value]) => ({ name, value })),
+        childNodes: children
+      })
+      const domText = (value) => ({ nodeType: 3, nodeValue: value })
+      return vm.runInNewContext(js, {
+        location: new URL(publicBodyUrl),
+        URL,
+        document: {
+          documentElement: domEl('html', {}, [
+            domEl('head', {}, [domEl('title', {}, [domText('机电工程学院')])]),
+            domEl('body', {}, [
+              domEl('header', { class: 'site-header' }, [domEl('a', {}, [domText('统一身份认证')])]),
+              domEl('div', { id: 'vsb_content' }, [
+                domEl('h1', {}, [domText(jdItems[0].title)]),
+                domEl('p', {}, [domText('学院公告正文')])
+              ])
+            ])
+          ])
+        }
+      })
+    }
   }, { ...jdItems[0], url: publicBodyUrl.replace('https:', 'http:') })
   assert.deepEqual(collegeLoads, [publicBodyUrl])
   assert.equal(collegeBody.sourceUrl, publicBodyUrl)
@@ -1014,6 +1034,126 @@ async function runTests() {
   const jumpStable = pickBestRelease(multiVerManifest, { versionCode: 11, versionName: '0.1.10' }, false)
   assert.ok(jumpStable?.notes.includes('【v0.2.2】') && jumpStable?.notes.includes('【v0.2.1】'))
   assert.ok(!jumpStable?.notes.includes('0.2.2-beta.6'))
+
+  // 36. notices.ts: 过滤校徽/轮播/导航装饰图，保留真实正文上传图
+  assert.equal(isDecorativeNoticeImage('https://cl.haust.edu.cn/images/logo.png'), true)
+  assert.equal(isDecorativeNoticeImage('https://cl.haust.edu.cn/images/banner1.jpg'), true)
+  assert.equal(isDecorativeNoticeImage('https://cl.haust.edu.cn/images/xiaohui.png'), true)
+  assert.equal(isDecorativeNoticeImage('https://cl.haust.edu.cn/__local/A/B/C/content.jpg'), false)
+  assert.equal(isDecorativeNoticeImage('https://news.haust.edu.cn/_upload/article/images/photo1.jpg'), false)
+  const decorHtml = `
+    <html><body>
+      <header class="header"><img src="/images/logo.png" alt="校徽"><div class="banner"><img src="/images/banner1.jpg" alt="轮播"></div></header>
+      <div id="vsb_content">
+        <h1>关于体测补考的通知</h1>
+        <p>请同学们按时参加补考。</p>
+        <img src="/images/logo.png" alt="校徽">
+        <img src="/__local/1/2/3/notice-table.jpg" alt="补考时间表">
+      </div>
+    </body></html>
+  `
+  const decorParsed = parseNoticeBodyHtml(decorHtml, 'https://cl.haust.edu.cn/info/1045/888.htm', {
+    expectedTitle: '关于体测补考的通知',
+    expectedId: '888',
+    expectedUrl: 'https://cl.haust.edu.cn/info/1045/888.htm',
+    publicCollege: true
+  })
+  assert.equal(decorParsed.articleMatch, true)
+  assert.deepEqual(decorParsed.imgs, ['https://cl.haust.edu.cn/__local/1/2/3/notice-table.jpg'])
+
+  // 37. notices.ts: 严格拒绝标题不匹配或仅有装饰图的错乱页面
+  const mismatchedHtml = `
+    <html><body>
+      <div class="content"><img src="/images/banner1.jpg" alt="轮播"></div>
+      <div id="vsb_content"><h1>完全不同的另一篇通知</h1><p>错误文章内容</p></div>
+    </body></html>
+  `
+  const mismatchedParsed = parseNoticeBodyHtml(mismatchedHtml, 'https://cl.haust.edu.cn/info/1045/999.htm', {
+    expectedTitle: '关于体测补考的通知',
+    expectedId: '888',
+    expectedUrl: 'https://cl.haust.edu.cn/info/1045/888.htm',
+    publicCollege: true
+  })
+  assert.equal(mismatchedParsed.articleMatch, false)
+  assert.equal(mismatchedParsed.imgs.length, 0)
+
+  // 38. notice-db.ts: 正文缓存读写强校验标题一致性，拒绝并自动淘汰错乱正文
+  const cacheItemA = { source: 'cl', sourceName: '材料学院', id: '1045_777', title: '关于体测补考的通知', date: '2026-11-25', dept: '材料学院', url: 'https://cl.haust.edu.cn/info/1045/777.htm' }
+  await saveNoticeBody(cacheItemA, { title: '另一篇完全无关的通知', text: '错乱正文', imgs: [], articleMatch: true })
+  assert.equal(await getCachedNoticeBody(cacheItemA), null)
+  await saveNoticeBody(cacheItemA, { title: '关于体测补考的通知', text: '正确正文', imgs: [], articleMatch: true })
+  const hitA = await getCachedNoticeBody(cacheItemA)
+  assert.equal(hitA?.text, '正确正文')
+  assert.equal(await getCachedNoticeBody({ ...cacheItemA, title: '被替换成另一个标题的通知' }), null)
+
+  // 39. notices.ts: fetchBodyFast 不把非登录 3xx 误判为 auth，且 school/news 支持公网直连优先 + WebVPN 回退
+  const newsTried = []
+  const fastNewsFallback = await fetchBodyFast(
+    {
+      getCookies: async () => 'wengine_vpn_ticket=ok',
+      get: async (url) => {
+        newsTried.push(url)
+        if (url === 'https://news.haust.edu.cn/info/1001/555.htm') {
+          return { status: 302, url, headers: { Location: 'https://news.haust.edu.cn/info/1001/555.htm/' }, data: '' }
+        }
+        return {
+          status: 200,
+          url,
+          data: '<html><body><div id="vsb_content"><h1>喜报：我校获奖名单</h1><p>新闻正文内容</p></div></body></html>'
+        }
+      }
+    },
+    { source: 'news', sourceName: '校园新闻', id: '555', title: '喜报：我校获奖名单', date: '2026-11-25', dept: '宣传部', url: 'https://news.haust.edu.cn/info/1001/555.htm' }
+  )
+  assert.equal(fastNewsFallback.failure, undefined)
+  assert.ok(fastNewsFallback.text.includes('新闻正文内容'))
+  assert.deepEqual(newsTried, [
+    'https://news.haust.edu.cn/info/1001/555.htm',
+    'https://news-haust-edu-cn-s.haust.edu.cn/info/1001/555.htm'
+  ])
+
+  // 40. chaoxing.ts: 原生 2 路小并发 HTTP 拉取 + 遇 403/429 风控立刻熔断停止后续课程
+  const fastCoursesPayload = JSON.stringify({
+    channelList: [
+      { cataid: '100000002', content: { cpi: '1', clazz: { data: [{ id: 'c1' }] }, pEnc: 'enc1', course: { data: [{ id: '101', name: '高等数学' }] } } },
+      { cataid: '100000002', content: { cpi: '1', clazz: { data: [{ id: 'c2' }] }, pEnc: 'enc2', course: { data: [{ id: '102', name: '大学物理' }] } } },
+      { cataid: '100000002', content: { cpi: '1', clazz: { data: [{ id: 'c3' }] }, pEnc: 'enc3', course: { data: [{ id: '103', name: '线性代数' }] } } },
+      { cataid: '100000002', content: { cpi: '1', clazz: { data: [{ id: 'c4' }] }, pEnc: 'enc4', course: { data: [{ id: '104', name: '工程图学' }] } } }
+    ]
+  })
+  const fastProgress = await fetchChaoxingProgressFast(
+    {
+      getCookies: async () => 'UID=1',
+      get: async (url) => {
+        if (url.includes('backclazzdata')) return { status: 200, url, data: fastCoursesPayload }
+        return { status: 200, url, data: JSON.stringify({ status: true, data: { job: 8, publishJobNum: 10 } }) }
+      }
+    },
+    ['工程图学'],
+    { concurrency: 2, delayMs: 0 }
+  )
+  assert.equal(fastProgress.progress.length, 3)
+  assert.equal(fastProgress.progress[0].percent, 80)
+
+  const riskCalls = []
+  await assert.rejects(
+    () => fetchChaoxingActivitiesFast(
+      {
+        getCookies: async () => 'UID=1',
+        get: async (url) => {
+          riskCalls.push(url)
+          if (url.includes('backclazzdata')) return { status: 200, url, data: fastCoursesPayload }
+          if (url.includes('courseId=101')) return { status: 429, url, data: 'Too Many Requests' }
+          return { status: 200, url, data: JSON.stringify({ data: { activeList: [] } }) }
+        }
+      },
+      [],
+      { concurrency: 2, delayMs: 0 }
+    ),
+    (err) => err instanceof ChaoxingRiskError && err.status === 429
+  )
+  // 第 1 批（courseId 101 & 102）触发 429 熔断后，绝不能再请求第 2 批（courseId 103 & 104）
+  assert.equal(riskCalls.some((u) => u.includes('courseId=103') || u.includes('courseId=104')), false)
 
   console.log('ALL OFFLINE UNIT TESTS PASSED')
 }
