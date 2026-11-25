@@ -1,19 +1,19 @@
 {
-    "updatedAt":  "2026-11-25T04:38:33Z",
+    "updatedAt":  "2026-11-25T04:58:26Z",
     "schemaVersion":  1,
     "beta":  {
                  "mirrors":  [
-                                 "https://edgeone.gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2-beta.5/kexiaomiao-v0.2.2-beta.5.apk",
-                                 "https://gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2-beta.5/kexiaomiao-v0.2.2-beta.5.apk"
+                                 "https://edgeone.gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2-beta.6/kexiaomiao-v0.2.2-beta.6.apk",
+                                 "https://gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2-beta.6/kexiaomiao-v0.2.2-beta.6.apk"
                              ],
-                 "apkUrl":  "https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2-beta.5/kexiaomiao-v0.2.2-beta.5.apk",
-                 "size":  3388467,
-                 "notes":  "1. 「我的」页面全新重构为系统更新/关于本机卡片矩阵风格，新增精致克制极光流光 Hero 卡与 2×2 快捷磁贴\n2. 校园通知列表与正文改为原生 HTTP 全源并发直连（提速 10–20×），脱离隐藏 WebView 串行阻塞，异常自动回退兜底\n3. 学习通课程进度与活动拉取自动跳过已忽略课程（兼容全称与旧版截断名），减少无效请求",
-                 "publishedAt":  "2026-11-25T04:38:33Z",
-                 "sha256":  "ac9c442f29dd476c7bbd8114e40602fed7389b2b9a08c7a02d2796aee51b1b13",
+                 "apkUrl":  "https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2-beta.6/kexiaomiao-v0.2.2-beta.6.apk",
+                 "size":  3397343,
+                 "notes":  "1. 课程表页面全面重构为苹果/WakeUp 极简风：新增 1–20 周快速选周抽屉、丝滑日/周滑块切换、日视图实时上课状态与方向滑入动效、周视图一屏自适应智能周末折叠（5/7 列）与当前时间红线\n2. 新手引导重构为 6 步手机开机 OOBE 互动教程：支持实时切换浅/深色外观、微缩日/周课表预览、亲手左滑忽略旧课沙盒与一键订阅本院通知",
+                 "publishedAt":  "2026-11-25T04:58:26Z",
+                 "sha256":  "53d56f6054e324411c3f50b25cb6b356d157c25ea283c2452b40223e54a8d42f",
                  "channel":  "beta",
-                 "versionName":  "0.2.2-beta.5",
-                 "versionCode":  21
+                 "versionName":  "0.2.2-beta.6",
+                 "versionCode":  22
              },
     "stable":  {
                    "mirrors":  [

@@ -73,6 +73,7 @@ type Sub = null | 'schedule' | 'chargers' | 'card' | 'exam'
 
 const READ_KEY = 'haust-kxm-read-v1'
 const WEEK_KEY = 'haust-kxm-week'
+const VIEW_KEY = 'haust-kxm-sched-view'
 const ANCHOR_KEY = 'haust-kxm-anchor'
 
 const NAV: Array<[Tab, string, string]> = [
@@ -203,7 +204,7 @@ export default function App() {
 
   /* ---------------- 交互状态 ---------------- */
   const [week, setWeek] = useState(() => Number(lsGet(WEEK_KEY, 10)) || 10)
-  const [view, setView] = useState<'day' | 'week'>('day')
+  const [view, setView] = useState<'day' | 'week'>(() => (lsGet<string>(VIEW_KEY, 'day') === 'week' ? 'week' : 'day'))
   const [day, setDay] = useState(todayWeekday)
   const [anchor, setAnchor] = useState(loadAnchor)
   const [readIds, setReadIds] = useState<string[]>(() => lsGet(READ_KEY, [] as string[]))
@@ -1372,11 +1373,15 @@ export default function App() {
           onRefresh={manualRefresh}
           onBack={() => setSub(null)}
           onWeek={(d) => setWeek((w) => Math.min(20, Math.max(1, w + d)))}
+          onSelectWeek={(w) => setWeek(Math.min(20, Math.max(1, w)))}
           onReset={() => {
             setWeek(currentWeek)
             setDay(todayWd)
           }}
-          onView={setView}
+          onView={(v) => {
+            setView(v)
+            lsSet(VIEW_KEY, v)
+          }}
           onDay={setDay}
           onCourse={(id) => setModal({ kind: 'course', id })}
           onConflict={() => setModal({ kind: 'conflict' })}
@@ -1523,6 +1528,10 @@ export default function App() {
         <Onboarding
           step={onboardingStep}
           replayMode={onboardingReplay}
+          theme={theme}
+          onChangeTheme={setTheme}
+          subscribedColleges={subscribedColleges}
+          onChangeSubscribedColleges={(ids) => setSubscribedColleges(writeSubscribedColleges(ids))}
           onStepChange={setOnboardingStep}
           onBindAccount={handleOnboardingBind}
           onStartDemo={handleOnboardingDemo}
