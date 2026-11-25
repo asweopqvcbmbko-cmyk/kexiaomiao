@@ -1,19 +1,19 @@
 {
-    "updatedAt":  "2026-11-25T04:58:26Z",
+    "updatedAt":  "2026-11-25T05:09:40Z",
     "schemaVersion":  1,
     "beta":  {
                  "mirrors":  [
-                                 "https://edgeone.gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2-beta.6/kexiaomiao-v0.2.2-beta.6.apk",
-                                 "https://gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2-beta.6/kexiaomiao-v0.2.2-beta.6.apk"
+                                 "https://edgeone.gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2-beta.7/kexiaomiao-v0.2.2-beta.7.apk",
+                                 "https://gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2-beta.7/kexiaomiao-v0.2.2-beta.7.apk"
                              ],
-                 "apkUrl":  "https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2-beta.6/kexiaomiao-v0.2.2-beta.6.apk",
-                 "size":  3397343,
-                 "notes":  "1. 课程表页面全面重构为苹果/WakeUp 极简风：新增 1–20 周快速选周抽屉、丝滑日/周滑块切换、日视图实时上课状态与方向滑入动效、周视图一屏自适应智能周末折叠（5/7 列）与当前时间红线\n2. 新手引导重构为 6 步手机开机 OOBE 互动教程：支持实时切换浅/深色外观、微缩日/周课表预览、亲手左滑忽略旧课沙盒与一键订阅本院通知",
-                 "publishedAt":  "2026-11-25T04:58:26Z",
-                 "sha256":  "53d56f6054e324411c3f50b25cb6b356d157c25ea283c2452b40223e54a8d42f",
+                 "apkUrl":  "https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2-beta.7/kexiaomiao-v0.2.2-beta.7.apk",
+                 "size":  3398187,
+                 "notes":  "1. 升级为澎湃 4「光感玻璃」悬浮底栏，带高透磨砂、1px 光感折射顶边与平滑滑动胶囊指示器\n2. 禁用 Android 12+ 系统级 WebView 过滚拉伸，彻底修复下拉刷新时的页面与底栏果冻变形\n3. 修复新课程表点击非今日课程卡片无法弹出详情页的 Bug\n4. 新增跨版本更新日志自动聚合能力，跨多代升级也能一次看全所有新增功能",
+                 "publishedAt":  "2026-11-25T05:09:40Z",
+                 "sha256":  "897fb337b1d7c86ad8a420b8ae974007ace4544a9b5d5b41fde99dbe6f6edd9d",
                  "channel":  "beta",
-                 "versionName":  "0.2.2-beta.6",
-                 "versionCode":  22
+                 "versionName":  "0.2.2-beta.7",
+                 "versionCode":  23
              },
     "stable":  {
                    "mirrors":  [
@@ -28,5 +28,19 @@
                    "channel":  "stable",
                    "versionName":  "0.2.1",
                    "versionCode":  16
-               }
+               },
+    "changelog":  [
+                      {
+                          "channel":  "stable",
+                          "versionCode":  16,
+                          "versionName":  "0.2.1",
+                          "notes":  "更名为「科小喵」，更换全新品牌启动图标与统一视觉风格"
+                      },
+                      {
+                          "channel":  "beta",
+                          "versionCode":  23,
+                          "versionName":  "0.2.2-beta.7",
+                          "notes":  "1. 升级为澎湃 4「光感玻璃」悬浮底栏，带高透磨砂与滑动光感胶囊\n2. 禁用 Android 12+ WebView 系统果冻拉伸，修复下拉变形\n3. 修复新课程表点击非今日课程无法弹出详情页的 Bug\n4. 新增跨版本更新日志自动聚合能力"
+                      }
+                  ]
 }

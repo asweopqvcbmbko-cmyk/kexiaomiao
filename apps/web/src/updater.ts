@@ -21,11 +21,19 @@ export type ReleaseAsset = {
   minAndroidSdk?: number
 }
 
+export type ChangelogEntry = {
+  versionCode: number
+  versionName: string
+  channel?: UpdateChannel
+  notes: string
+}
+
 export type UpdateManifest = {
   schemaVersion?: number
   updatedAt?: string
   stable?: ReleaseAsset | null
   beta?: ReleaseAsset | null
+  changelog?: ChangelogEntry[]
 }
 
 export type AppVersionInfo = {
@@ -145,6 +153,40 @@ export function isNewerRelease(candidate: Pick<ReleaseAsset, 'versionCode' | 've
 }
 
 /**
+ * 跨版本更新日志自动聚合：
+ * 若清单提供了 changelog 历史列表，则收集「高于当前版本且不高于目标版本」的全部相关版本更新要点，
+ * 避免用户跨多代升级时遗漏中间版本的新功能提醒。
+ */
+export function aggregateChangelogNotes(
+  manifest: UpdateManifest | null | undefined,
+  current: AppVersionInfo,
+  target: ReleaseAsset,
+  includeBeta: boolean
+): string {
+  const entries = Array.isArray(manifest?.changelog) ? manifest.changelog : []
+  const matched = entries
+    .filter((entry) => entry && entry.versionName && entry.notes && entry.notes.trim())
+    .filter((entry) => includeBeta || entry.channel !== 'beta')
+    .filter((entry) => isNewerRelease(entry, current))
+    .filter((entry) => {
+      const cmp = compareSemver(entry.versionName, target.versionName)
+      return cmp < 0 || (cmp === 0 && (entry.versionCode || 0) <= (target.versionCode || 0))
+    })
+    .sort((a, b) => {
+      const cmp = compareSemver(b.versionName, a.versionName)
+      return cmp !== 0 ? cmp : (b.versionCode || 0) - (a.versionCode || 0)
+    })
+
+  if (matched.length <= 1) {
+    return target.notes || matched[0]?.notes || ''
+  }
+
+  return matched
+    .map((entry) => `【v${entry.versionName}】\n${entry.notes.trim()}`)
+    .join('\n')
+}
+
+/**
  * 按渠道策略挑选最优可更新包：
  * - 关闭 Beta：只检查 stable
  * - 开启 Beta：在 stable 与 beta 中选版本更高的（同版本时 stable 优先于 beta）
@@ -170,7 +212,11 @@ export function pickBestRelease(
     if (a.channel !== b.channel) return a.channel === 'stable' ? -1 : 1
     return (b.versionCode || 0) - (a.versionCode || 0)
   })
-  return newer[0]
+  const best = newer[0]
+  return {
+    ...best,
+    notes: aggregateChangelogNotes(manifest, current, best, includeBeta)
+  }
 }
 
 export function localDayKey(date = new Date()): string {

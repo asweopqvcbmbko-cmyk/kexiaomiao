@@ -66,9 +66,10 @@
 
 /* ── 基础 ─────────────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-html { scrollbar-width: none; }
+html { scrollbar-width: none; overscroll-behavior-y: none; }
 body {
   margin: 0;
+  overscroll-behavior-y: none;
   font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   background: var(--bg);
   color: var(--text);
@@ -1121,21 +1122,103 @@ b, strong { font-weight: 650; }
   body { padding-top: var(--safe-top); }
   .shell { display: block; max-width: 520px; }
   .sidebar { display: none; }
-  .content { padding: 14px 16px calc(var(--nav-h) + var(--safe-bottom) + 24px); }
+  .content { padding: 14px 16px calc(var(--nav-h) + var(--safe-bottom) + 38px); }
   h1 { font-size: 26px; }
+  /* 澎湃 4 光感玻璃悬浮底栏 */
   .mobile-nav {
-    position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
-    padding: 0 8px var(--safe-bottom); background: var(--nav); border-top: 1px solid var(--line);
+    position: fixed;
+    left: 14px;
+    right: 14px;
+    bottom: calc(var(--safe-bottom) + 10px);
+    max-width: 440px;
+    margin: 0 auto;
+    z-index: 20;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    padding: 5px;
+    border-radius: 30px;
+    background: rgba(255, 255, 255, .74);
+    -webkit-backdrop-filter: blur(24px) saturate(185%);
+    backdrop-filter: blur(24px) saturate(185%);
+    border: 1px solid rgba(255, 255, 255, .82);
+    box-shadow:
+      0 10px 30px rgba(24, 39, 75, .11),
+      0 2px 8px rgba(24, 39, 75, .05),
+      inset 0 1px 0 rgba(255, 255, 255, .92);
+    isolation: isolate;
+    overflow: hidden;
   }
-  .mobile-nav button { height: var(--nav-h); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; font-size: 11px; color: var(--muted); }
-  .mobile-nav button .navicon { width: 52px; height: 28px; border-radius: 99px; display: grid; place-items: center; transition: background .2s; }
-  .mobile-nav button.active { color: var(--brand); font-weight: 650; }
-  .mobile-nav button.active .navicon { background: var(--tint); }
+  .mobile-nav::before {
+    content: "";
+    position: absolute;
+    inset: 0 16% auto;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .95) 50%, transparent);
+    pointer-events: none;
+    z-index: 2;
+  }
+  [data-theme="dark"] .mobile-nav {
+    background: rgba(20, 26, 42, .74);
+    border-color: rgba(182, 201, 255, .16);
+    box-shadow:
+      0 14px 36px rgba(0, 0, 0, .44),
+      0 2px 10px rgba(0, 0, 0, .24),
+      inset 0 1px 0 rgba(255, 255, 255, .14);
+  }
+  [data-theme="dark"] .mobile-nav::before {
+    background: linear-gradient(90deg, transparent, rgba(182, 201, 255, .36) 50%, transparent);
+  }
+  .mobile-nav-pill {
+    position: absolute;
+    top: 5px;
+    left: 5px;
+    width: calc((100% - 10px) / 4);
+    height: calc(100% - 10px);
+    border-radius: 25px;
+    background: linear-gradient(180deg, color-mix(in srgb, var(--brand) 14%, #fff), color-mix(in srgb, var(--brand) 9%, transparent));
+    border: 1px solid color-mix(in srgb, var(--brand) 18%, rgba(255, 255, 255, .85));
+    box-shadow:
+      0 4px 12px color-mix(in srgb, var(--brand) 16%, transparent),
+      inset 0 1px 0 rgba(255, 255, 255, .9);
+    transition: transform .32s cubic-bezier(.22, 1.15, .36, 1), opacity .2s ease;
+    pointer-events: none;
+    z-index: 0;
+  }
+  [data-theme="dark"] .mobile-nav-pill {
+    background: linear-gradient(180deg, color-mix(in srgb, var(--brand) 28%, rgba(255, 255, 255, .06)), color-mix(in srgb, var(--brand) 16%, rgba(16, 22, 36, .35)));
+    border-color: color-mix(in srgb, var(--brand) 32%, rgba(255, 255, 255, .12));
+    box-shadow:
+      0 6px 16px rgba(0, 0, 0, .28),
+      inset 0 1px 0 rgba(255, 255, 255, .18);
+  }
+  .mobile-nav.in-sub .mobile-nav-pill { opacity: 0; }
+  .mobile-nav button {
+    position: relative;
+    z-index: 1;
+    height: 52px;
+    border-radius: 25px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    font-size: 11px;
+    color: var(--muted);
+    transition: color .2s ease, transform .15s ease;
+  }
+  .mobile-nav button:active { transform: scale(.94); }
+  .mobile-nav button .navicon { width: 28px; height: 24px; border-radius: 99px; display: grid; place-items: center; transition: transform .22s ease; }
+  .mobile-nav button.active { color: var(--brand); font-weight: 680; }
+  .mobile-nav button.active .navicon { transform: translateY(-1px); }
   .backdrop { align-items: flex-end; padding: 10px 10px calc(10px + var(--safe-bottom)); }
   .dialog { border-radius: 26px 26px 20px 20px; }
-  .toast { bottom: calc(var(--nav-h) + var(--safe-bottom) + 16px); }
+  .toast { bottom: calc(var(--nav-h) + var(--safe-bottom) + 26px); }
   .power-main strong { font-size: 58px; }
   .content.schedule-page { padding-left: 14px; padding-right: 14px; }
+  @media (prefers-reduced-motion: reduce) {
+    .mobile-nav-pill { transition: opacity .15s ease; }
+    .mobile-nav button:active { transform: none; }
+  }
 }
 @media (min-width: 761px) {
   .home { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
@@ -1146,7 +1229,6 @@ b, strong { font-weight: 650; }
 .power-state{display:grid;gap:4px;position:relative;z-index:1;padding:6px 0 2px}.power-state b{font-size:17px;line-height:1.4}.power-state small{color:inherit;opacity:.8}
 .conflict br{display:none}.conflict > span{display:grid;gap:2px}
 @media(min-width:761px){.home{align-items:stretch}.power{align-content:space-between}}
-@media(max-width:760px){.mobile-nav{max-width:520px;margin:0 auto;border-radius:20px 20px 0 0;border:1px solid var(--line);border-bottom:0}}
 .setting-copy{flex:1;min-width:0;display:grid;gap:1px}.setting-copy b{font-weight:600;font-size:15px}.setting-copy small{text-align:left;white-space:normal;font-size:12px}.setting.danger b{color:var(--danger)}
 .tl-row.same{margin-top:-4px}
 @media(min-width:761px){.power{align-content:start}.power-state{padding-top:24px}.power-state b{font-size:19px}}

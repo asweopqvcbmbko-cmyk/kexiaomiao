@@ -1002,6 +1002,19 @@ async function runTests() {
   )
   assert.deepEqual(filteredCourses.map((c) => c.courseName), ['大学物理(下)'])
 
+  // 35. updater.ts: 跨版本更新日志自动聚合
+  const multiVerManifest = {
+    stable: { versionCode: 23, versionName: '0.2.2', channel: 'stable', apkUrl: 'https://example.com/0.2.2.apk', sha256: 'ccc', notes: '最新0.2.2特性' },
+    changelog: [
+      { versionCode: 16, versionName: '0.2.1', channel: 'stable', notes: '更名为科小喵，更新桌面图标' },
+      { versionCode: 22, versionName: '0.2.2-beta.6', channel: 'beta', notes: '测试版课表重构' },
+      { versionCode: 23, versionName: '0.2.2', channel: 'stable', notes: '全源通知并发提速与课程表重构' }
+    ]
+  }
+  const jumpStable = pickBestRelease(multiVerManifest, { versionCode: 11, versionName: '0.1.10' }, false)
+  assert.ok(jumpStable?.notes.includes('【v0.2.2】') && jumpStable?.notes.includes('【v0.2.1】'))
+  assert.ok(!jumpStable?.notes.includes('0.2.2-beta.6'))
+
   console.log('ALL OFFLINE UNIT TESTS PASSED')
 }
 

@@ -1079,7 +1079,9 @@ export default function App() {
 
   /* ---------------- 弹窗内容 ---------------- */
   const courseSess = modal?.kind === 'course'
-    ? (tab === 'home' ? todaySessions : sessions).find((s) => s.id === modal.id) ?? null
+    ? ((!sub && tab === 'home' ? todaySessions : sessions).find((s) => s.id === modal.id) ??
+        sessions.find((s) => s.id === modal.id) ??
+        null)
     : null
   const conflictItems =
     modal?.kind === 'conflict' && modal.id
@@ -1577,7 +1579,14 @@ export default function App() {
           </PullToRefresh>
         </main>
       </div>
-      <nav className="mobile-nav" aria-label="主导航">
+      <nav className={`mobile-nav${sub ? ' in-sub' : ''}`} aria-label="主导航">
+        <span
+          className="mobile-nav-pill"
+          aria-hidden="true"
+          style={{
+            transform: `translate3d(${Math.max(0, NAV.findIndex(([t]) => t === tab)) * 100}%, 0, 0)`
+          }}
+        />
         {navButtons}
       </nav>
       {renderModal()}

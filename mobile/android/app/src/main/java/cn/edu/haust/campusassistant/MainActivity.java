@@ -1,6 +1,7 @@
 package cn.edu.haust.campusassistant;
 
 import android.os.Bundle;
+import android.view.View;
 import android.webkit.CookieManager;
 import android.webkit.WebView;
 
@@ -16,6 +17,11 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(SchoolCredentialsPlugin.class);
         registerPlugin(AppUpdaterPlugin.class);
         super.onCreate(savedInstanceState);
+
+        // 禁用 Android 12+ 系统级 WebView 边缘果冻拉伸（EdgeEffect Stretch），避免与自定义下拉刷新叠加导致页面与底栏变形
+        if (bridge != null && bridge.getWebView() != null) {
+            bridge.getWebView().setOverScrollMode(View.OVER_SCROLL_NEVER);
+        }
 
         // 迁移至 OnBackPressedDispatcher，兼容 Android 16 (targetSdk 36) 预测性返回手势
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
