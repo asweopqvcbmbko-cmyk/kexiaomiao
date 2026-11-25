@@ -1,19 +1,19 @@
 {
-    "updatedAt":  "2026-11-25T08:44:31Z",
+    "updatedAt":  "2026-11-25T08:54:10Z",
     "schemaVersion":  1,
     "beta":  {
                  "mirrors":  [
-                                 "https://edgeone.gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.3-beta.4/kexiaomiao-v0.2.3-beta.4.apk",
-                                 "https://gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.3-beta.4/kexiaomiao-v0.2.3-beta.4.apk"
+                                 "https://edgeone.gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.3-beta.5/kexiaomiao-v0.2.3-beta.5.apk",
+                                 "https://gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.3-beta.5/kexiaomiao-v0.2.3-beta.5.apk"
                              ],
-                 "apkUrl":  "https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.3-beta.4/kexiaomiao-v0.2.3-beta.4.apk",
-                 "size":  3403951,
-                 "notes":  "- 修复农学院、车辆学院等站点列表抓取混入顶部导航栏菜单（学院简介/现任领导/资料下载等）的问题，通知缓存升至 v4 自动清脏并保留已读记录\n- 医技学院校内受限通知统一走 WebVPN 自动通道读取，公网与内网通知均可正常打开\n- 修复学习通仪表盘分段 Tab（作业/考试/待办）数字包含已提交与已结束条目的问题，改为仅统计未完成数量，与上方统计卡完全一致",
-                 "publishedAt":  "2026-11-25T08:44:31Z",
-                 "sha256":  "72797c8045c9f98228c46ccbb5026df19082338eb1fa5cba00481a0bf5f88543",
+                 "apkUrl":  "https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.3-beta.5/kexiaomiao-v0.2.3-beta.5.apk",
+                 "size":  3403995,
+                 "notes":  "- 修复云端更新重启后后台静默续登期间界面短暂闪烁「未登录」并隐藏课表/考试快照的问题：探活阶段延后广播登出事件，始终无缝展示本地缓存数据，仅在静默重登确实失败时才切换未登录\n- 包含 v0.2.3-beta.1 ~ beta.4 全部修复（通知正文解析/图片代理/导航栏过滤/v4 缓存自愈、学习通键盘黑屏与 2 路并发提速、静默登录落盘与 WebVPN 自动续签）",
+                 "publishedAt":  "2026-11-25T08:54:10Z",
+                 "sha256":  "d85aabe44a924edf6eba390224c5609a0a822ab2c2c21ffcaa5324f01d30cb45",
                  "channel":  "beta",
-                 "versionName":  "0.2.3-beta.4",
-                 "versionCode":  28
+                 "versionName":  "0.2.3-beta.5",
+                 "versionCode":  29
              },
     "stable":  {
                    "mirrors":  [
@@ -65,6 +65,12 @@
                           "versionCode":  28,
                           "versionName":  "0.2.3-beta.4",
                           "notes":  "- 修复农学院、车辆学院等站点列表抓取混入顶部导航栏菜单（学院简介/现任领导/资料下载等）的问题，通知缓存升至 v4 自动清脏并保留已读记录\n- 医技学院校内受限通知统一走 WebVPN 自动通道读取，公网与内网通知均可正常打开\n- 修复学习通仪表盘分段 Tab（作业/考试/待办）数字包含已提交与已结束条目的问题，改为仅统计未完成数量，与上方统计卡完全一致"
+                      },
+                      {
+                          "channel":  "beta",
+                          "versionCode":  29,
+                          "versionName":  "0.2.3-beta.5",
+                          "notes":  "- 修复云端更新重启后后台静默续登期间界面短暂闪烁「未登录」并隐藏课表/考试快照的问题：探活阶段延后广播登出事件，始终无缝展示本地缓存数据，仅在静默重登确实失败时才切换未登录\n- 包含 v0.2.3-beta.1 ~ beta.4 全部修复（通知正文解析/图片代理/导航栏过滤/v4 缓存自愈、学习通键盘黑屏与 2 路并发提速、静默登录落盘与 WebVPN 自动续签）"
                       }
                   ]
 }

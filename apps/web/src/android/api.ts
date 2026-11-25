@@ -485,7 +485,13 @@ function checkRuntimeVersion(): Promise<boolean> {
   }).catch(() => false)
 }
 
-async function statusNow(interactive = false, waitMs = 10 * 60 * 1000, credential: Credential | null = null, remember?: boolean): Promise<SessionStatus> {
+async function statusNow(
+  interactive = false,
+  waitMs = 10 * 60 * 1000,
+  credential: Credential | null = null,
+  remember?: boolean,
+  deferFailureBroadcast = false
+): Promise<SessionStatus> {
   let credentialUsed = false
   if (interactive) {
     await browser.open({ url: HOME, title: '登录教务（统一身份认证）' })
@@ -572,14 +578,18 @@ async function statusNow(interactive = false, waitMs = 10 * 60 * 1000, credentia
     currentWeek: info.week,
     hint: ok ? '' : last
   }
-  write('session', st)
+  if (ok || !deferFailureBroadcast) {
+    write('session', st)
+  }
   if (ok && interactive) {
     try {
       if (credentialUsed && credential) localStorage.setItem(SCHOOL_IDENTITY_KEY, credential.username)
       else localStorage.removeItem(SCHOOL_IDENTITY_KEY)
     } catch (_) {}
   }
-  emitSession(st)
+  if (ok || !deferFailureBroadcast) {
+    emitSession(st)
+  }
   if (ok && credential && credentialUsed && remember !== undefined) {
     try {
       if (remember) {
@@ -766,28 +776,36 @@ async function ensureSession(
   await checkRuntimeVersion()
   const previousName = read<SessionStatus>('session')?.studentName
   const portalReady = verifyPortal && !forceRelogin && await hasNoticePortalCookie().catch(() => false)
-  const st = forceRelogin || (verifyPortal && !portalReady)
-    ? { loggedIn: false, checkedAt: new Date().toISOString() }
-    : await statusNow(false)
+  const probedDirect = !(forceRelogin || (verifyPortal && !portalReady))
+  const st = probedDirect
+    ? await statusNow(false, 10 * 60 * 1000, null, undefined, true)
+    : { loggedIn: false, checkedAt: new Date().toISOString() }
+  const finalizeLoggedOut = () => {
+    if (probedDirect) {
+      write('session', st)
+      emitSession(st)
+    }
+    return st
+  }
   if (st.loggedIn) {
     autoLoginTripped = false
     return verifyPortal ? { ...st, portalReady } : st
   }
   if (autoLoginTripped) {
     log('auto login skipped: fuse tripped')
-    return st
+    return finalizeLoggedOut()
   }
   const now = Date.now()
   if (now - readLastAutoLoginAt() < AUTO_LOGIN_COOLDOWN_MS) {
     log('auto login skipped: cooldown active')
-    return st
+    return finalizeLoggedOut()
   }
   const credential = await readCred().catch((error: unknown) => {
     log('silentReloginSchool fail', authFailureReason(error))
     return null
   })
   const account = localStorage.getItem(SCHOOL_IDENTITY_KEY)
-  if (!credential || (account && account !== credential.username)) return st
+  if (!credential || (account && account !== credential.username)) return finalizeLoggedOut()
   writeLastAutoLoginAt(now)
   try {
     const { session, portalReady } = await silentReloginSchool(credential)
@@ -799,7 +817,7 @@ async function ensureSession(
     return verifyPortal ? { ...session, portalReady } : session
   } catch (_) {
     autoLoginTripped = true
-    return st
+    return finalizeLoggedOut()
   }
 }
 
