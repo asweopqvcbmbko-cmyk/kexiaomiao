@@ -1259,6 +1259,7 @@ public class SchoolBrowserPlugin extends Plugin {
                     public void onPageFinished(WebView view, String u) {
                         // CAS 登录会连跳好几页：等 URL 连续两次不变再回，否则会把中间页当成落地页
                         settle(view, done, call, 900);
+                        flushCookies();
                     }
 
                     @Override

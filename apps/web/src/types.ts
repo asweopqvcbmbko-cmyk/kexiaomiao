@@ -227,7 +227,7 @@ export type { InactiveTaskView as TaskData } from './types/inactive-task-view'
 export type { AirconRoom, AirconElectricityReading, AirconElectricityResult, AirconElectricityService } from './types/aircon-electricity'
 export type AuthRequest =
   | ({ platform: 'school' } & SchoolLogin)
-  | { platform: 'chaoxing'; mode: 'password'; account: string; password: string }
+  | { platform: 'chaoxing'; mode: 'password'; account: string; password: string; remember?: boolean }
   | { platform: 'chaoxing'; mode: 'sms'; account: string }
   | { platform: 'chaoxing'; mode: 'qr' }
 

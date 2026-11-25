@@ -39,6 +39,7 @@ import {
 } from '../src/android/lib/chaoxing-auth.ts'
 import { buildApkDownloadUrls, buildManifestUrls, isUpdateRepoConfigured } from '../src/update-config.ts'
 import { compareSemver, pickBestRelease, shouldAutoCheckToday } from '../src/updater.ts'
+import { hasExistingUserConfig, readChaoxingSnapshot } from '../src/snapshot.ts'
 
 async function runTests() {
   // 1. card.ts: 落地到登录页应立刻抛出 NO_SESSION
@@ -702,7 +703,34 @@ async function runTests() {
   assert.equal(shouldAutoCheckToday({ autoCheck: true, includeBeta: false, lastAutoCheckDay: '2026-11-24', ignoredVersion: '' }, new Date('2026-11-24T21:00:00')), false)
   assert.equal(shouldAutoCheckToday({ autoCheck: false, includeBeta: false, lastAutoCheckDay: '', ignoredVersion: '' }, new Date('2026-11-24T09:00:00')), false)
 
-  console.log('ALL 30 OFFLINE UNIT TESTS PASSED')
+  const storageDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+  const snapshotStorage = new Map()
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: { getItem: (key) => snapshotStorage.get(key) ?? null }
+  })
+  try {
+    const expired = { loggedIn: false, authRequired: true, works: [{ title: '作业A' }], exams: [] }
+    const legacy = { loggedIn: true, works: [], exams: [] }
+    snapshotStorage.set('haust.cache.chaoxing', JSON.stringify(expired))
+    snapshotStorage.set('haust.cache.v1.chaoxing', JSON.stringify(legacy))
+    assert.deepEqual(readChaoxingSnapshot(), { ...expired, loggedIn: true, stale: true })
+    snapshotStorage.delete('haust.cache.chaoxing')
+    assert.deepEqual(readChaoxingSnapshot(), { ...legacy, stale: true })
+    snapshotStorage.clear()
+    assert.equal(readChaoxingSnapshot(), null)
+    assert.equal(hasExistingUserConfig(), false)
+    snapshotStorage.set('haust.cache.session', JSON.stringify({ loggedIn: true }))
+    assert.equal(hasExistingUserConfig(), true)
+    snapshotStorage.set('haust.cache.session', JSON.stringify({ loggedIn: false }))
+    snapshotStorage.set('haust.cache.courses', JSON.stringify({ courses: [{ name: '高数' }] }))
+    assert.equal(hasExistingUserConfig(), true)
+  } finally {
+    if (storageDescriptor) Object.defineProperty(globalThis, 'localStorage', storageDescriptor)
+    else delete globalThis.localStorage
+  }
+
+  console.log('ALL OFFLINE UNIT TESTS PASSED')
 }
 
 runTests().catch((err) => {

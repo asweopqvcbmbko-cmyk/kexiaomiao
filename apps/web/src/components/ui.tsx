@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { Icon } from '../icons'
 
 /** 页头：左侧标题（子页带返回键），右侧刷新 / 附加操作 */
@@ -125,6 +126,7 @@ export function Modal({
   const downOnBackdrop = useRef(false)
 
   useEffect(() => {
+    if (typeof document === 'undefined') return
     prev.current = document.activeElement
     document.body.style.overflow = 'hidden'
     const first = ref.current?.querySelector<HTMLElement>('.iconbtn')
@@ -136,6 +138,7 @@ export function Modal({
   }, [])
 
   useEffect(() => {
+    if (typeof document === 'undefined') return
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.stopPropagation()
@@ -159,7 +162,9 @@ export function Modal({
     return () => document.removeEventListener('keydown', onKey)
   }, [])
 
-  return (
+  if (typeof document === 'undefined') return null
+
+  return createPortal(
     <div
       className={`backdrop${closing ? ' closing' : ''}`}
       onMouseDown={(e) => {
@@ -188,6 +193,7 @@ export function Modal({
         </div>
         {children}
       </section>
-    </div>
+    </div>,
+    document.body
   )
 }

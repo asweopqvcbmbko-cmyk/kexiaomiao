@@ -32,6 +32,8 @@ public class SchoolCredentialsPlugin extends Plugin {
     private static final String IV = "iv";
     private static final String CX_KEY_ALIAS = "haust.chaoxing-credentials.v1";
     private static final String CX_PREFS = "haust_chaoxing_credentials";
+    private static final String CX_ACTIVE_KEY_ALIAS = "haust.chaoxing-credentials.v2";
+    private static final String CX_ACTIVE_PREFS = "haust_chaoxing_credentials_v2";
 
     private SharedPreferences preferences() {
         return getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
@@ -119,6 +121,21 @@ public class SchoolCredentialsPlugin extends Plugin {
     @PluginMethod
     public synchronized void purgeRetiredCredentials(PluginCall call) {
         clearFrom(call, CX_KEY_ALIAS, CX_PREFS);
+    }
+
+    @PluginMethod
+    public synchronized void readChaoxing(PluginCall call) {
+        readFrom(call, CX_ACTIVE_KEY_ALIAS, CX_ACTIVE_PREFS);
+    }
+
+    @PluginMethod
+    public synchronized void writeChaoxing(PluginCall call) {
+        writeTo(call, CX_ACTIVE_KEY_ALIAS, CX_ACTIVE_PREFS);
+    }
+
+    @PluginMethod
+    public synchronized void clearChaoxing(PluginCall call) {
+        clearFrom(call, CX_ACTIVE_KEY_ALIAS, CX_ACTIVE_PREFS);
     }
 
     private void clearFrom(PluginCall call, String alias, String prefsName) {

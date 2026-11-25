@@ -13,7 +13,7 @@ export function readTheme(): Theme {
     const v = localStorage.getItem(KEY)
     if (v === 'light' || v === 'dark' || v === 'system') return v
   } catch (_) {}
-  return 'dark'
+  return 'system'
 }
 
 export function applyTheme(theme: Theme) {

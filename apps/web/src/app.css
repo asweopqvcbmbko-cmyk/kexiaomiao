@@ -826,7 +826,6 @@ b, strong { font-weight: 650; }
   border-radius: 50%;
   animation: auth-spin .75s linear infinite;
 }
-.ptr-body { will-change: transform; }
 
 /* ── 动画 ─────────────────────────────────────────────────────────────── */
 @keyframes rotate { to { transform: rotate(360deg); } }
@@ -1291,7 +1290,14 @@ b, strong { font-weight: 650; }
 .dashboard .topbar { margin-bottom: 2px; }
 .dash-note { padding: 11px 14px; font-size: 12px; color: var(--muted); }
 .dash-actions { display: flex; flex-wrap: wrap; gap: 6px; }
-.dash-settings { display: grid; gap: 12px; max-height: 60vh; overflow-y: auto; }
+.dash-settings {
+  display: grid;
+  gap: 12px;
+  max-height: 62dvh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
 .dash-settings label, .dash-course-setting { display: flex; align-items: center; gap: 10px; }
 .dash-settings h3 { margin: 6px 0 0; font-size: 14px; }
 .dash-settings input, .dash-course-setting .chip { flex: none; }

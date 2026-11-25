@@ -1,15 +1,19 @@
 {
-    "updatedAt":  "2026-11-24T15:30:02Z",
+    "updatedAt":  "2026-11-25T02:24:47Z",
     "schemaVersion":  1,
     "beta":  {
-                 "size":  3367391,
+                 "mirrors":  [
+                                 "https://edgeone.gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2-beta.1/kexiaomiao-v0.2.2-beta.1.apk",
+                                 "https://gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2-beta.1/kexiaomiao-v0.2.2-beta.1.apk"
+                             ],
+                 "apkUrl":  "https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.2-beta.1/kexiaomiao-v0.2.2-beta.1.apk",
+                 "size":  3373611,
+                 "notes":  "1. 教务与学习通默认本机 Keystore 加密保存凭据，过期或异端登录被踢时后台全静默无感续登；2. 修复学习通缓存 Key 偏差与过期变空白问题，冷启动与断网均优先展示缓存；3. 修复仪表盘设置弹窗遮罩错位与课程列表无法下滑；4. 移除宿舍绑定多余的搜索房间输入框；5. 首次安装默认跟随系统主题并更新新版新手引导。",
+                 "publishedAt":  "2026-11-25T02:24:47Z",
+                 "sha256":  "0643da3eb4005354e8d64d8ee8f304632f451f5e0dddfb499edd70f164918917",
                  "channel":  "beta",
-                 "publishedAt":  "2026-11-24T15:01:57Z",
-                 "versionCode":  14,
-                 "apkUrl":  "https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.0-beta.3/kexiaomiao-v0.2.0-beta.3.apk",
-                 "notes":  "1. 新增全局手势阻尼下拉刷新（首页 / 仪表盘 / 通知页丝滑下拉即刷）\n2. 新增 Android 原生线性马达微触感反馈（Tab 切换、下拉到达阈值、刷新完成、开关与登录结果）\n3. 修复云端更新清单 CDN 缓存延迟，发版后秒级可检",
-                 "versionName":  "0.2.0-beta.3",
-                 "sha256":  "e3a90ab6fdf62cd243674777782c67ab1e05546f1227fc4148c677cdd50b68e4"
+                 "versionName":  "0.2.2-beta.1",
+                 "versionCode":  17
              },
     "stable":  {
                    "mirrors":  [

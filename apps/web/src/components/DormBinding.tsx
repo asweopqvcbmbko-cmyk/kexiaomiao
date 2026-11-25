@@ -30,7 +30,6 @@ export function DormBinding({ room, onSave }: {
   const [buildId, setBuildId] = useState(room?.buildId || '')
   const [levelId, setLevelId] = useState(room?.levelId || '')
   const [roomVerify, setRoomVerify] = useState(room?.roomVerify || '')
-  const [search, setSearch] = useState('')
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
   const campus = room?.campus || '河南科技大学'
@@ -47,9 +46,6 @@ export function DormBinding({ room, onSave }: {
     ? { stage: 'rooms', areaId, buildId: selectedBuildId, levelId: selectedLevelId } : null,
   [areaId, selectedBuildId, selectedLevelId]))
   const selectedRoom = rooms.options.find(option => option.id === roomVerify)
-  const keyword = search.normalize('NFKC').trim().toLowerCase()
-  const filtered = rooms.options.filter(option => option.name.normalize('NFKC').toLowerCase().includes(keyword))
-  const visibleRooms = selectedRoom && !filtered.includes(selectedRoom) ? [selectedRoom, ...filtered] : filtered
   const failed = [buildings, levels, rooms].find(result => result.error)
   const loading = buildings.loading || levels.loading || rooms.loading
 
@@ -76,7 +72,6 @@ export function DormBinding({ room, onSave }: {
           setBuildId(event.target.value)
           setLevelId('')
           setRoomVerify('')
-          setSearch('')
         }}>
           <option value="" disabled>{buildings.loading ? '正在加载楼栋…' : '选择楼栋'}</option>
           {buildings.options.map(option => <option key={option.id} value={option.id}>{option.name}</option>)}
@@ -86,18 +81,15 @@ export function DormBinding({ room, onSave }: {
         <select value={selectedLevelId} disabled={saving || levels.options.length <= 1} required onChange={event => {
           setLevelId(event.target.value)
           setRoomVerify('')
-          setSearch('')
         }}>
           <option value="" disabled>{levels.loading ? '正在加载楼层…' : '选择楼层'}</option>
           {levels.options.map(option => <option key={option.id} value={option.id}>{option.name}</option>)}
         </select>
       </label>
-      <label>搜索房间<input type="search" value={search} placeholder="输入房间号，例如 115"
-        disabled={saving || !rooms.options.length} onChange={event => setSearch(event.target.value)} /></label>
       <label>房间
-        <select value={selectedRoom?.id || ''} disabled={saving || !visibleRooms.length} required onChange={event => setRoomVerify(event.target.value)}>
-          <option value="" disabled>{rooms.loading ? '正在加载房间…' : rooms.options.length && !filtered.length ? '没有匹配的房间' : '选择房间'}</option>
-          {visibleRooms.map(option => <option key={option.id} value={option.id}>{option.name}</option>)}
+        <select value={selectedRoom?.id || ''} disabled={saving || !rooms.options.length} required onChange={event => setRoomVerify(event.target.value)}>
+          <option value="" disabled>{rooms.loading ? '正在加载房间…' : '选择房间'}</option>
+          {rooms.options.map(option => <option key={option.id} value={option.id}>{option.name}</option>)}
         </select>
       </label>
       {room?.roomName && !selectedRoom ? <small>当前绑定：{room.roomName}</small> : null}

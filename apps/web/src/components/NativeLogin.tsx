@@ -28,7 +28,7 @@ export function NativeLogin({ platform, authenticate, onClose, onSuccess, onManu
   const [account, setAccount] = useState(() => school ? '' : readChaoxingAccount(localStorage))
   const [password, setPassword] = useState('')
   const [shown, setShown] = useState(false)
-  const [remember, setRemember] = useState(false)
+  const [remember, setRemember] = useState(true)
   const [code, setCode] = useState('')
   const [error, setError] = useState('')
   const [overlay, setOverlay] = useState<AuthOverlayState | null>(null)
@@ -166,7 +166,7 @@ export function NativeLogin({ platform, authenticate, onClose, onSuccess, onManu
     const value = account.trim()
     if (!value) return
     if (school && password) void start({ platform: 'school', username: value, password, remember })
-    else if (mode === 'password' && password) void start({ platform: 'chaoxing', mode, account: value, password })
+    else if (mode === 'password' && password) void start({ platform: 'chaoxing', mode, account: value, password, remember })
     else if (mode === 'sms' && sms && code.trim()) {
       sms.submit(code.trim())
       setSms(null)
@@ -267,9 +267,9 @@ export function NativeLogin({ platform, authenticate, onClose, onSuccess, onManu
                   </div>
                 </label>
               )}
-              {school && <label className="native-login-remember">
+              {(school || mode === 'password') && <label className="native-login-remember">
                 <input type="checkbox" role="switch" checked={remember} onChange={(event) => setRemember(event.target.checked)} />
-                记住密码（本机 Keystore 加密保存）
+                记住密码（本机 Keystore 加密保存，支持自动无感续登）
               </label>}
               <button className="primary" type="submit" disabled={mode === 'sms' && !sms}>登录</button>
               {onManualLogin && (

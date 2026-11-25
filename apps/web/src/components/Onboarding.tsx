@@ -13,22 +13,20 @@ export type OnboardingProps = {
 const SLIDES = [
   {
     badge: '河科大校园助手',
-    title: '课表、电费、通知\n一屏就够了',
-    desc: '把分散在各个校园系统里的核心信息聚合成清晰卡片，打开即看今天最重要的事。',
+    title: '课表、学习通、电费\n一屏就够了',
     features: [
       { icon: 'book', title: '今日课表 & 考试倒计时', sub: '下一节课、教室地点与期末倒数一目了然' },
-      { icon: 'air', title: '宿舍空调电量', sub: '随时查看剩余度数与余额，偏低提前提醒' },
-      { icon: 'bell', title: '教务与学院通知', sub: '未读消息直达首页，点开即读正文与附件' }
+      { icon: 'grid', title: '学习通仪表盘聚合', sub: '自动汇总待办作业、考试、课堂任务与课程进度' },
+      { icon: 'air', title: '宿舍电量 & 校园通知', sub: '空调余量随时查，教务与学院通知增量直达' }
     ]
   },
   {
-    badge: '隐私与双网离线',
-    title: '数据纯本地保存\n校内外都能秒开',
-    desc: '不建中转服务器，所有课表、通知缓存与加密凭据都只留在你的手机本地。',
+    badge: '无感体验 & 隐私本地',
+    title: '一次登录无感畅用\n数据纯本地保存',
     features: [
-      { icon: 'storage', title: '零云端托管', sub: '凭据经本机系统安全存储加密，切换或清除一键可控' },
-      { icon: 'sync', title: '双网自动适配', sub: '校内直连、校外走 WebVPN，离线也能回看已缓存内容' },
-      { icon: 'bolt', title: '静默增量刷新', sub: '冷启动秒出上次快照，有新变化时轻波纹提示更新' }
+      { icon: 'storage', title: '本机加密 & 静默续登', sub: '凭据经 Android Keystore 加密留存本机，会话过期后台无感续登' },
+      { icon: 'sync', title: '全屏原生登录 & 离线快照', sub: '校内外双网自动适配，冷启动秒开上次缓存' },
+      { icon: 'bolt', title: '内置云端自动更新', sub: '支持正式版 / Beta 频道切换，应用内一键校验升级' }
     ]
   },
   {
@@ -81,7 +79,7 @@ export function Onboarding({ step, replayMode, onStepChange, onBindAccount, onSt
       <main className="onboarding-body" key={step}>
         <span className="onboarding-badge">{current.badge}</span>
         <h1 className="onboarding-title">{current.title}</h1>
-        <p className="onboarding-desc">{current.desc}</p>
+        {'desc' in current && <p className="onboarding-desc">{current.desc}</p>}
 
         <div className="onboarding-list">
           {current.features.map((f) => (

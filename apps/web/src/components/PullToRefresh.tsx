@@ -38,6 +38,7 @@ export function PullToRefresh({
     window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0
 
   function onTouchStart(e: React.TouchEvent<HTMLDivElement>) {
+    if ((e.target as HTMLElement | null)?.closest('.backdrop, [role="dialog"], .native-login')) return
     if (disabled || phase === 'refreshing' || e.touches.length !== 1) return
     if (getScrollTop() > 1) return
     startY.current = e.touches[0].clientY
@@ -133,6 +134,7 @@ export function PullToRefresh({
         className="ptr-body"
         style={{
           transform: pull > 0 ? `translate3d(0, ${pull}px, 0)` : undefined,
+          willChange: pull > 0 ? 'transform' : undefined,
           transition: tracking.current ? 'none' : 'transform .26s cubic-bezier(.22, .8, .24, 1)'
         }}
       >

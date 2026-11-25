@@ -10,14 +10,15 @@
  */
 import { chaoxing, eams, notices, card, chargers } from './lib/exports'
 import { browser, engine, overlay } from './engine'
-import { CapacitorHttp, registerPlugin } from '@capacitor/core'
+import { CapacitorHttp, ExceptionCode, registerPlugin } from '@capacitor/core'
 import { retireStudyData } from './retired-study-data'
 import { createAirconElectricityService } from './lib/aircon-electricity'
 import {
   authDelay, authPageScript, AuthFlowError, classifyAuthError, classifyAuthRisk,
-  driveAuth, failAuth, inspectAuthPage, waitForAuthInput
+  driveAuth, failAuth, inspectAuthPage, waitForAuthInput, type AuthBrowser
 } from './lib/auth-flow'
-import { driveChaoxingAuth, isChaoxingDestination, rememberChaoxingAccount } from './lib/chaoxing-auth'
+import { CHAOXING_LAST_ACCOUNT_KEY, driveChaoxingAuth, isChaoxingDestination, rememberChaoxingAccount } from './lib/chaoxing-auth'
+import { readChaoxingSnapshot } from '../snapshot'
 import { createCloudPaymentSession } from '../../../desktop/src/lib/aircon-session.mjs'
 import {
   WebVpnAuthError,
@@ -137,6 +138,9 @@ const credentialStore = registerPlugin<{
   read(): Promise<Partial<Credential>>
   write(credential: Credential): Promise<void>
   clear(): Promise<void>
+  readChaoxing(): Promise<Partial<Credential>>
+  writeChaoxing(credential: Credential): Promise<void>
+  clearChaoxing(): Promise<void>
 }>('SchoolCredentials')
 
 async function readCred(): Promise<Credential | null> {
@@ -156,6 +160,20 @@ async function readCred(): Promise<Credential | null> {
 async function clearSavedCred(): Promise<void> {
   localStorage.removeItem(K(legacyCred))
   await credentialStore.clear()
+}
+
+async function readChaoxingCred(): Promise<Credential | null> {
+  const { username, password } = await credentialStore.readChaoxing()
+  return username && password ? { username, password } : null
+}
+
+async function clearSavedChaoxingCred(): Promise<void> {
+  try {
+    await credentialStore.clearChaoxing()
+  } catch (error) {
+    // Older Android binaries have no v2 credential store.
+    if ((error as { code?: string } | null)?.code !== ExceptionCode.Unimplemented) throw error
+  }
 }
 
 async function clearSchoolCookies(): Promise<boolean> {
@@ -268,20 +286,22 @@ function casPageKey(url: string): string {
 /** 自动登录熔断与冷却：5 分钟内最多自动登录 1 次（持久化防冷启动连击），触发锁定/密码错误/验证码立即熔断 */
 const AUTO_LOGIN_COOLDOWN_MS = 5 * 60 * 1000
 const AUTO_LOGIN_TS_KEY = 'haust.autologin.lastAt'
+const CHAOXING_AUTO_LOGIN_TS_KEY = 'haust.cx.autologin.lastAt'
 let autoLoginTripped = false
+let chaoxingAutoLoginTripped = false
 
-function readLastAutoLoginAt(): number {
+function readLastAutoLoginAt(key = AUTO_LOGIN_TS_KEY): number {
   try {
-    return Number(localStorage.getItem(AUTO_LOGIN_TS_KEY)) || 0
+    return Number(localStorage.getItem(key)) || 0
   } catch (_) {
     return 0
   }
 }
 
-function writeLastAutoLoginAt(ts: number) {
+function writeLastAutoLoginAt(ts: number, key = AUTO_LOGIN_TS_KEY) {
   try {
-    if (ts > 0) localStorage.setItem(AUTO_LOGIN_TS_KEY, String(ts))
-    else localStorage.removeItem(AUTO_LOGIN_TS_KEY)
+    if (ts > 0) localStorage.setItem(key, String(ts))
+    else localStorage.removeItem(key)
   } catch (_) {}
 }
 
@@ -398,6 +418,81 @@ async function statusNow(interactive = false, waitMs = 10 * 60 * 1000, credentia
   return st
 }
 
+async function driveSchoolAuth(credential: Credential, options: AuthOptions, background = false): Promise<SessionStatus> {
+  const { signal, onProgress } = options
+  // driveAuth initially opens the WebView with silent: true.
+  return driveAuth(browser, overlay.run, options, HOME, '教务系统统一认证', async ({ execute, readUrl, setRisk }) => {
+    const submitted = new Set<string>()
+    const retriedCaptcha = new Set<string>()
+    let landing = ''
+    let riskUrl = ''
+    const deadline = Date.now() + (background ? 70_000 : 5 * 60_000)
+    while (Date.now() < deadline) {
+      const url = await readUrl()
+      if (riskUrl && riskUrl !== url) {
+        await setRisk(false)
+        riskUrl = ''
+      }
+      if (isEams(url) && !isEamsLanding(url)) {
+        const raw = await execute(LOGGED_IN_JS)
+        if (typeof raw === 'string' && JSON.parse(raw)?.ok) {
+          await setRisk(false)
+          onProgress({ type: 'stage', message: '正在校验教务会话…' })
+          const info = await execute(INFO_JS)
+          const { name = '', week = null } = typeof info === 'string' ? JSON.parse(info) || {} : {}
+          return {
+            loggedIn: true, verified: true, checkedAt: new Date().toISOString(), url,
+            studentName: name, currentWeek: week
+          } satisfies SessionStatus
+        }
+      }
+      if (isEamsLanding(url) && landing !== url && await execute(LANDING_CLICK_JS) === 'clicked') landing = url
+      const page = await inspectAuthPage(execute, true)
+      if (page) {
+        const failure = classifyAuthError(page.error) || classifyAuthError(page.text)
+        const risk = classifyAuthRisk(page)
+        const key = casPageKey(url)
+        if (background && risk !== 'none') failAuth('captcha', '统一身份认证需要人工验证')
+        const retryCaptcha = submitted.has(key) && failure?.reason === 'captcha' && risk === 'image' && !retriedCaptcha.has(key)
+        if (failure && !retryCaptcha) throw new AuthFlowError(failure)
+        if (risk === 'complex' || (risk === 'image' && !page.dataUrl)) {
+          await setRisk(true)
+          riskUrl = url
+        } else {
+          if (riskUrl) {
+            await setRisk(false)
+            riskUrl = ''
+          }
+          if (isCasPage(url) && (retryCaptcha || (!submitted.has(key) && submitted.size < 2))) {
+            let code: string | undefined
+            if (risk === 'image' && page.dataUrl) {
+              const answer = await waitForAuthInput<CaptchaAnswer>(signal, (respond) => {
+                onProgress({ type: 'captcha', dataUrl: page.dataUrl!, message: failure?.message || '请输入图片中的验证码', respond })
+              })
+              if ('refresh' in answer) {
+                await execute(authPageScript(true, 'captcha_refresh'))
+                await authDelay(550, signal)
+                continue
+              }
+              code = answer.text
+            }
+            if ((await execute(authPageScript(true, 'password', {
+              account: credential.username, password: credential.password, code
+            }))) === 'submitted') {
+              if (retryCaptcha) retriedCaptcha.add(key)
+              submitted.add(key)
+              onProgress({ type: 'stage', message: '正在校验教务会话…' })
+              await authDelay(1100, signal)
+            }
+          }
+        }
+      }
+      await authDelay(550, signal)
+    }
+    return failAuth('timeout', '统一身份认证登录超时，请重试')
+  })
+}
+
 async function loginSchoolSilently(request: SchoolLogin, options: AuthOptions): Promise<SessionStatus> {
   const { signal, onProgress } = options
   const previous = localStorage.getItem(SCHOOL_IDENTITY_KEY)
@@ -414,75 +509,7 @@ async function loginSchoolSilently(request: SchoolLogin, options: AuthOptions): 
   localStorage.removeItem(AIRCON_FAIL_TS_KEY)
   onProgress({ type: 'stage', message: '正在连接统一身份认证…' })
   try {
-    const session = await driveAuth(browser, overlay.run, options, HOME, '教务系统统一认证', async ({ execute, readUrl, setRisk }) => {
-      const submitted = new Set<string>()
-      const retriedCaptcha = new Set<string>()
-      let landing = ''
-      let riskUrl = ''
-      const deadline = Date.now() + 5 * 60_000
-      while (Date.now() < deadline) {
-        const url = await readUrl()
-        if (riskUrl && riskUrl !== url) {
-          await setRisk(false)
-          riskUrl = ''
-        }
-        if (isEams(url) && !isEamsLanding(url)) {
-          const raw = await execute(LOGGED_IN_JS)
-          if (typeof raw === 'string' && JSON.parse(raw)?.ok) {
-            await setRisk(false)
-            onProgress({ type: 'stage', message: '正在校验教务会话…' })
-            const info = await execute(INFO_JS)
-            const { name = '', week = null } = typeof info === 'string' ? JSON.parse(info) || {} : {}
-            return {
-              loggedIn: true, verified: true, checkedAt: new Date().toISOString(), url,
-              studentName: name, currentWeek: week
-            } satisfies SessionStatus
-          }
-        }
-        if (isEamsLanding(url) && landing !== url && await execute(LANDING_CLICK_JS) === 'clicked') landing = url
-        const page = await inspectAuthPage(execute, true)
-        if (page) {
-          const failure = classifyAuthError(page.error) || classifyAuthError(page.text)
-          const risk = classifyAuthRisk(page)
-          const key = casPageKey(url)
-          const retryCaptcha = submitted.has(key) && failure?.reason === 'captcha' && risk === 'image' && !retriedCaptcha.has(key)
-          if (failure && !retryCaptcha) throw new AuthFlowError(failure)
-          if (risk === 'complex' || (risk === 'image' && !page.dataUrl)) {
-            await setRisk(true)
-            riskUrl = url
-          } else {
-            if (riskUrl) {
-              await setRisk(false)
-              riskUrl = ''
-            }
-            if (isCasPage(url) && (retryCaptcha || (!submitted.has(key) && submitted.size < 2))) {
-              let code: string | undefined
-              if (risk === 'image' && page.dataUrl) {
-                const answer = await waitForAuthInput<CaptchaAnswer>(signal, (respond) => {
-                  onProgress({ type: 'captcha', dataUrl: page.dataUrl!, message: failure?.message || '请输入图片中的验证码', respond })
-                })
-                if ('refresh' in answer) {
-                  await execute(authPageScript(true, 'captcha_refresh'))
-                  await authDelay(550, signal)
-                  continue
-                }
-                code = answer.text
-              }
-              if ((await execute(authPageScript(true, 'password', {
-                account: request.username, password: request.password, code
-              }))) === 'submitted') {
-                if (retryCaptcha) retriedCaptcha.add(key)
-                submitted.add(key)
-                onProgress({ type: 'stage', message: '正在校验教务会话…' })
-                await authDelay(1100, signal)
-              }
-            }
-          }
-        }
-        await authDelay(550, signal)
-      }
-      return failAuth('timeout', '统一身份认证登录超时，请重试')
-    })
+    const session = await driveSchoolAuth(request, options)
     signal.throwIfAborted()
     const status: SessionStatus = session
     try {
@@ -522,11 +549,16 @@ function single<T>(key: string, fn: () => Promise<T>): Promise<T> {
   return p
 }
 
-/**
- * 保证有一个能用的教务会话：先用页面内容验一次，失败就（有凭据时）自动走一遍登录窗。
- * 注意它内部只调 statusNow，不拿 withEngine 锁 —— 调用方已经在锁里了，再拿会自锁。
- */
-async function ensureSession(): Promise<any> {
+async function silentReloginSchool(credential: Credential): Promise<SessionStatus> {
+  return driveSchoolAuth(credential, {
+    signal: new AbortController().signal,
+    onProgress: () => {}
+  }, true)
+}
+
+/** 调用方已持有 withEngine 锁，续登与验活在同一队列操作内完成。 */
+async function ensureSession(): Promise<SessionStatus> {
+  const previousName = read<SessionStatus>('session')?.studentName
   const st = await statusNow(false)
   if (st.loggedIn) {
     autoLoginTripped = false
@@ -542,21 +574,25 @@ async function ensureSession(): Promise<any> {
     return st
   }
   const credential = await readCred().catch(() => null)
-  if (credential) {
-    writeLastAutoLoginAt(now)
-    log('saved creds -> auto login')
-    const res = await statusNow(true, 70 * 1000, credential)
-    if (!res.loggedIn) autoLoginTripped = true
-    return res
+  const account = localStorage.getItem(SCHOOL_IDENTITY_KEY)
+  if (!credential || (account && account !== credential.username)) return st
+  writeLastAutoLoginAt(now)
+  try {
+    const session = await silentReloginSchool(credential)
+    if (previousName && session.studentName && previousName !== session.studentName) clearAccountCache()
+    localStorage.setItem(SCHOOL_IDENTITY_KEY, credential.username)
+    write('session', session)
+    autoLoginTripped = false
+    emitSession(session)
+    return session
+  } catch (_) {
+    autoLoginTripped = true
+    return st
   }
-  return st
 }
 
-/** 会话被学校那边判失效时：清掉本地结论，重新验/重登一次 */
+/** 会话被学校判失效时，重新验活并按需续登。 */
 async function recoverSession(): Promise<boolean> {
-  try {
-    localStorage.removeItem(K('session'))
-  } catch (_) {}
   const st = await ensureSession()
   log('recoverSession', !!st.loggedIn)
   return !!st.loggedIn
@@ -668,6 +704,30 @@ let studyMigration: Promise<void> | undefined
 let chaoxingCacheVersion = 0
 const chaoxingCacheKeys = ['chaoxing', 'chaoxing.activities', 'chaoxing.progress']
 
+function clearChaoxingCache() {
+  for (const key of chaoxingCacheKeys) {
+    localStorage.removeItem(K(key))
+    localStorage.removeItem(K('v1.' + key))
+  }
+}
+
+async function fetchWithChaoxingRelogin<T extends { authRequired?: boolean }>(
+  fetchResult: () => Promise<T>, version: number
+): Promise<T> {
+  let result: T | undefined
+  try {
+    result = await fetchResult()
+  } catch (error) {
+    if (!(error instanceof chaoxing.ChaoxingAuthError)) throw error
+  }
+  if (result && !result.authRequired) return result
+  if (version === chaoxingCacheVersion && await silentReloginChaoxing() && version === chaoxingCacheVersion) {
+    return fetchResult()
+  }
+  if (result) return result
+  throw new chaoxing.ChaoxingAuthError()
+}
+
 function cachedChaoxingCourses<T extends ChaoxingActivitiesResult | ChaoxingProgressResult>(
   key: string,
   ignoredCourses: string[],
@@ -680,8 +740,9 @@ function cachedChaoxingCourses<T extends ChaoxingActivitiesResult | ChaoxingProg
     if (version !== chaoxingCacheVersion) return empty
     try {
       await prepareStudyData()
-      const result = await fetchResult()
+      const result = await fetchWithChaoxingRelogin(fetchResult, version)
       if (version !== chaoxingCacheVersion) return empty
+      if (result.authRequired) throw new chaoxing.ChaoxingAuthError()
       // Course access parameters are needed only during the live request.
       return write(key, { ...result, courses: result.courses.map(({ enc, pEnc, ...course }) => course) })
     } catch (error) {
@@ -711,11 +772,57 @@ const CHAOXING_HOSTS = [
   'stat2-ans.chaoxing.com', 'im.chaoxing.com'
 ].join(',')
 
+function resetChaoxingAutoLogin() {
+  chaoxingAutoLoginTripped = false
+  writeLastAutoLoginAt(0, CHAOXING_AUTO_LOGIN_TS_KEY)
+}
+
+async function silentReloginChaoxing(): Promise<boolean> {
+  const now = Date.now()
+  if (chaoxingAutoLoginTripped || now - readLastAutoLoginAt(CHAOXING_AUTO_LOGIN_TS_KEY) < AUTO_LOGIN_COOLDOWN_MS) return false
+  const credential = await readChaoxingCred().catch(() => null)
+  if (!credential) return false
+
+  writeLastAutoLoginAt(now, CHAOXING_AUTO_LOGIN_TS_KEY)
+  const controller = new AbortController()
+  const backgroundBrowser: AuthBrowser = {
+    open: (options) => browser.open({ ...options, silent: true }),
+    isOpen: () => browser.isOpen(),
+    currentUrl: () => browser.currentUrl(),
+    // driveAuth calls reveal before reporting risk. Stop at the native boundary.
+    reveal: async () => {
+      controller.abort()
+      return { revealed: false }
+    },
+    conceal: () => browser.conceal(),
+    close: () => browser.close()
+  }
+  try {
+    await driveChaoxingAuth(backgroundBrowser, overlay.run, {
+      platform: 'chaoxing', mode: 'password', account: credential.username, password: credential.password
+    }, {
+      signal: controller.signal,
+      onProgress: (event) => {
+        if (event.type === 'captcha' || (event.type === 'risk' && event.revealed)) controller.abort()
+      }
+    })
+    controller.signal.throwIfAborted()
+    const dashboard = await chaoxing.fetchChaoxingDashboard(engine)
+    return dashboard.loggedIn && !dashboard.authRequired
+  } catch (error) {
+    const reason = error instanceof AuthFlowError ? error.failure.reason : undefined
+    if (controller.signal.aborted || reason === 'captcha' || reason === 'credentials' || reason === 'locked' || reason === 'rate_limit') {
+      chaoxingAutoLoginTripped = true
+    }
+    return false
+  }
+}
+
 async function loginChaoxingSilently(request: Extract<AuthRequest, { platform: 'chaoxing' }>, options: AuthOptions) {
   await prepareStudyData()
   options.signal.throwIfAborted()
   chaoxingCacheVersion += 1
-  for (const key of chaoxingCacheKeys) localStorage.removeItem(K(key))
+  clearChaoxingCache()
   const version = chaoxingCacheVersion
   if (!(await browser.clearCookiesForHosts({ hosts: CHAOXING_HOSTS })).ok) {
     failAuth('verification', '无法清除原学习通会话，请重试')
@@ -730,6 +837,19 @@ async function loginChaoxingSilently(request: Extract<AuthRequest, { platform: '
     if (!dashboard.loggedIn || dashboard.authRequired || version !== chaoxingCacheVersion) {
       failAuth('verification', '学习通会话校验失败，请重试')
     }
+    if (request.mode === 'password' && request.remember !== false) {
+      await credentialStore.writeChaoxing({ username: request.account, password: request.password })
+        .catch(() => clearSavedChaoxingCred().catch(() => {}))
+    } else {
+      // A successful QR login does not identify the account for password reuse.
+      const saved = request.mode === 'sms' ? await readChaoxingCred().catch(() => null) : null
+      if (!saved || request.mode !== 'sms' || saved.username !== request.account) {
+        await clearSavedChaoxingCred().catch(() => {})
+      }
+    }
+    resetChaoxingAutoLogin()
+    options.signal.throwIfAborted()
+    if (version !== chaoxingCacheVersion) failAuth('cancelled', '登录已取消')
     return write('chaoxing', dashboard)
   } catch (error) {
     if (!options.signal.aborted) {
@@ -778,12 +898,9 @@ export const androidApi = {
       ...result, progress: chaoxing.filterByIgnoredCourses(result.progress, ignored, (item) => item.courseName)
     })
   ),
-  chaoxingLogin: () => single('chaoxing-login', () => {
+  chaoxingLogin: () => single('chaoxing-login', () => withEngine(async () => {
     const version = ++chaoxingCacheVersion
-    for (const key of chaoxingCacheKeys) {
-      try { localStorage.removeItem(K(key)) } catch (_) {}
-    }
-    return withEngine(async () => {
+    clearChaoxingCache()
     await prepareStudyData()
     if (!(await browser.open({ url: chaoxing.CHAOXING_LOGIN_URL, title: '登录超星学习通' })).shown) {
       return { loggedIn: false }
@@ -801,7 +918,10 @@ export const androidApi = {
       }
       // 无论自动收窗还是用户手动点「完成」，统一用真实接口验活一次并缓存结果
       const probe = await chaoxing.fetchChaoxingDashboard(engine).catch(() => null)
-      if (probe?.loggedIn && version === chaoxingCacheVersion) {
+      if (probe?.loggedIn && !probe.authRequired && version === chaoxingCacheVersion) {
+        await clearSavedChaoxingCred().catch(() => {})
+        resetChaoxingAutoLogin()
+        if (version !== chaoxingCacheVersion) return { loggedIn: false }
         write('chaoxing', probe)
         return { loggedIn: true }
       }
@@ -810,27 +930,25 @@ export const androidApi = {
       await browser.close().catch(() => {})
       throw error
     }
-    })
-  }),
+  })),
 
   chaoxingDashboard: () => {
     const version = chaoxingCacheVersion
     return single('chaoxing:' + version, () => withEngine(async (): Promise<ChaoxingDashboard> => {
+      const empty = { loggedIn: false, works: [], exams: [], fetchedAt: new Date().toISOString() }
+      if (version !== chaoxingCacheVersion) return empty
       await prepareStudyData()
       let result: ChaoxingDashboard
       try {
-        result = await chaoxing.fetchChaoxingDashboard(engine)
-        if (result.loggedIn && !result.error && version === chaoxingCacheVersion) return write('chaoxing', result)
+        result = await fetchWithChaoxingRelogin(() => chaoxing.fetchChaoxingDashboard(engine), version)
+        if (result.loggedIn && !result.authRequired && !result.error && version === chaoxingCacheVersion) return write('chaoxing', result)
       } catch (error) {
-        result = {
-          loggedIn: false, works: [], exams: [], fetchedAt: new Date().toISOString(),
-          error: error instanceof chaoxing.ChaoxingParseError ? 'parse' : 'network'
-        }
+        result = error instanceof chaoxing.ChaoxingAuthError
+          ? { ...empty, authRequired: true }
+          : { ...empty, error: error instanceof chaoxing.ChaoxingParseError ? 'parse' : 'network' }
       }
-      if (version !== chaoxingCacheVersion) {
-        return { loggedIn: false, works: [], exams: [], fetchedAt: new Date().toISOString() }
-      }
-      const cached = read<ChaoxingDashboard>('chaoxing')
+      if (version !== chaoxingCacheVersion) return empty
+      const cached = readChaoxingSnapshot()
       return cached ? {
         ...cached, loggedIn: !result.authRequired, stale: true, authRequired: result.authRequired, error: result.error
       } : result
@@ -1064,11 +1182,23 @@ export const androidApi = {
     return true
   },
   clearCred: () => withEngine(async () => {
-    const results = await Promise.allSettled([clearSavedCred(), clearSchoolCookies()])
+    chaoxingCacheVersion += 1
+    const results = await Promise.allSettled([
+      clearSavedCred(),
+      clearSavedChaoxingCred(),
+      clearSchoolCookies(),
+      browser.clearCookiesForHosts({ hosts: CHAOXING_HOSTS }).then(({ ok }) => ok)
+    ])
     clearAccountCache()
+    clearChaoxingCache()
     localStorage.removeItem(SCHOOL_IDENTITY_KEY)
+    localStorage.removeItem(CHAOXING_LAST_ACCOUNT_KEY)
+    autoLoginTripped = results[0].status === 'rejected'
+    writeLastAutoLoginAt(0)
+    resetChaoxingAutoLogin()
+    chaoxingAutoLoginTripped = results[1].status === 'rejected'
     emitSession({ loggedIn: false, verified: true, checkedAt: new Date().toISOString() })
-    return results.every((result) => result.status === 'fulfilled')
+    return results.every((result) => result.status === 'fulfilled' && result.value !== false)
   }),
 
   /* 教务凭据：保存后登录时自动填（学校登录链要过两道 CAS） */

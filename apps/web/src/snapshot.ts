@@ -69,10 +69,12 @@ export function hasExistingUserConfig(): boolean {
   try {
     if (localStorage.getItem('haust.aircon.room')) return true
     if (localStorage.getItem('haust-kxm-onboarded') === 'true') return true
-    const cachedSession = safeReadJson<{ loggedIn?: boolean } | null>('haust.cache.v1.session', null)
-    if (cachedSession?.loggedIn) return true
-    const cachedCourses = safeReadJson<{ courses?: unknown[] } | null>('haust.cache.v1.courses', null)
-    if (Array.isArray(cachedCourses?.courses) && cachedCourses.courses.length > 0) return true
+    for (const prefix of ['haust.cache.', 'haust.cache.v1.']) {
+      const session = safeReadJson<{ loggedIn?: boolean } | null>(prefix + 'session', null)
+      if (session?.loggedIn) return true
+      const table = safeReadJson<{ courses?: unknown[] } | null>(prefix + 'courses', null)
+      if (Array.isArray(table?.courses) && table.courses.length > 0) return true
+    }
     const snap = safeReadJson<HomeSnapshot | null>(HOME_SNAPSHOT_KEY, null)
     if (snap?.status?.loggedIn || snap?.airconRoom?.roomVerify) return true
   } catch (_) {}
@@ -114,9 +116,14 @@ export function clearHomeSnapshot() {
 
 export function readChaoxingSnapshot(): ChaoxingDashboard | null {
   // Android's successful fetch cache also supplies the first dashboard render.
-  const snapshot = safeReadJson<ChaoxingDashboard | null>('haust.cache.v1.chaoxing', null)
-  if (!snapshot?.loggedIn || !Array.isArray(snapshot.works) || !Array.isArray(snapshot.exams)) return null
-  return { ...snapshot, stale: true }
+  for (const key of ['haust.cache.chaoxing', 'haust.cache.v1.chaoxing']) {
+    const snapshot = safeReadJson<ChaoxingDashboard | null>(key, null)
+    if (!Array.isArray(snapshot?.works) || !Array.isArray(snapshot.exams)) continue
+    if (snapshot.loggedIn || snapshot.works.length || snapshot.exams.length) {
+      return { ...snapshot, loggedIn: true, stale: true }
+    }
+  }
+  return null
 }
 
 export function readSavedTab(): AppTab {

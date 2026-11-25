@@ -113,6 +113,7 @@ export function Dashboard(props: {
   const [demoCourses] = useState(buildDemoChaoxingCourses)
   const dash = props.dashboard
   const loggedIn = !!dash?.loggedIn
+  const hasCachedData = !!(dash && ((dash.works?.length || 0) > 0 || (dash.exams?.length || 0) > 0 || dash.stale))
   const { cache, phase, load } = props.courseData
   const results: { activities: ChaoxingActivitiesResult | null; progress: ChaoxingProgressResult | null } | undefined =
     props.demoMode ? demoCourses : cache
@@ -302,7 +303,7 @@ export function Dashboard(props: {
         </div>
       ) : null}
 
-      {!props.demoMode && dash?.authRequired ? (
+      {!props.demoMode && dash?.authRequired && hasCachedData ? (
         <div className="demo-banner" role="status">
           <span className="demo-banner-text">学习通登录已过期，当前显示上次缓存</span>
           <button className="demo-banner-btn" type="button" onClick={props.onLogin}>
@@ -330,7 +331,7 @@ export function Dashboard(props: {
           sub="在 Android 手机端打开科小喵，即可通过内嵌浏览器复用学习通登录态汇总待办作业与考试。"
           icon="grid"
         />
-      ) : !loggedIn && !props.demoMode ? (
+      ) : !loggedIn && !hasCachedData && !props.demoMode ? (
         <div className="card dash-connect">
           <div className="dash-connect-icon">
             <Icon name="grid" />
