@@ -1,19 +1,19 @@
 {
-    "updatedAt":  "2026-11-25T07:43:52Z",
+    "updatedAt":  "2026-11-25T07:57:47Z",
     "schemaVersion":  1,
     "beta":  {
                  "mirrors":  [
-                                 "https://edgeone.gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.3-beta.1/kexiaomiao-v0.2.3-beta.1.apk",
-                                 "https://gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.3-beta.1/kexiaomiao-v0.2.3-beta.1.apk"
+                                 "https://edgeone.gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.3-beta.2/kexiaomiao-v0.2.3-beta.2.apk",
+                                 "https://gh-proxy.com/https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.3-beta.2/kexiaomiao-v0.2.3-beta.2.apk"
                              ],
-                 "apkUrl":  "https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.3-beta.1/kexiaomiao-v0.2.3-beta.1.apk",
-                 "size":  3402295,
-                 "notes":  "- 彻底重构通知正文解析与缓存：过滤校徽/轮播等装饰图，IndexedDB 正文缓存升级 v2 并强校验标题一致性（自动清理旧版错乱缓存）\n- 修复通知正文毫秒级读取不稳定问题：修正 3xx 跳转误判，公网新闻/通知支持直连与 WebVPN 自动回退\n- 修复 WebVPN 通知正文图片裂图：新增原生带 Cookie/Referer 图片代理\n- 修复学习通网页版展开软键盘黑屏问题（修正原生 Overlay IME insets 叠加）\n- 学习通课程进度与课堂活动升级为原生 2 路小并发 HTTP（200ms 间隔 + 403/429 熔断保护）并接入 10 分钟 SWR 冷却缓存",
-                 "publishedAt":  "2026-11-25T07:43:52Z",
-                 "sha256":  "437ca7087fdd1b8556096337bed1e8e7b9b5ac5ba5fa9029bd08f2e06e7747f4",
+                 "apkUrl":  "https://github.com/asweopqvcbmbko-cmyk/kexiaomiao/releases/download/v0.2.3-beta.2/kexiaomiao-v0.2.3-beta.2.apk",
+                 "size":  3402527,
+                 "notes":  "- 彻底修复 VSB 学院/全校通知正文解析被 \u003ch2\u003e发布时间：...\u003c/h2\u003e 误杀导致正文不显示的问题（实测多学院 60~75ms 秒开）\n- 修复公网直连返回「系统提示：您无权访问此页面」（如机电学院、教务处等）时未自动切换 WebVPN 代理通道的 Bug\n- 包含 v0.2.3-beta.1 全部修复（通知缓存 v2 标题强校验、WebVPN 图片原生代理防裂图、学习通键盘黑屏修复、学习通 2 路小并发 HTTP 提速与 10 分钟缓存）",
+                 "publishedAt":  "2026-11-25T07:57:47Z",
+                 "sha256":  "d5741e627beb98cd0db922664f881d384116a491c7accaaa29cafe32426c449b",
                  "channel":  "beta",
-                 "versionName":  "0.2.3-beta.1",
-                 "versionCode":  25
+                 "versionName":  "0.2.3-beta.2",
+                 "versionCode":  26
              },
     "stable":  {
                    "mirrors":  [
@@ -47,6 +47,12 @@
                           "versionCode":  25,
                           "versionName":  "0.2.3-beta.1",
                           "notes":  "- 彻底重构通知正文解析与缓存：过滤校徽/轮播等装饰图，IndexedDB 正文缓存升级 v2 并强校验标题一致性（自动清理旧版错乱缓存）\n- 修复通知正文毫秒级读取不稳定问题：修正 3xx 跳转误判，公网新闻/通知支持直连与 WebVPN 自动回退\n- 修复 WebVPN 通知正文图片裂图：新增原生带 Cookie/Referer 图片代理\n- 修复学习通网页版展开软键盘黑屏问题（修正原生 Overlay IME insets 叠加）\n- 学习通课程进度与课堂活动升级为原生 2 路小并发 HTTP（200ms 间隔 + 403/429 熔断保护）并接入 10 分钟 SWR 冷却缓存"
+                      },
+                      {
+                          "channel":  "beta",
+                          "versionCode":  26,
+                          "versionName":  "0.2.3-beta.2",
+                          "notes":  "- 彻底修复 VSB 学院/全校通知正文解析被 \u003ch2\u003e发布时间：...\u003c/h2\u003e 误杀导致正文不显示的问题（实测多学院 60~75ms 秒开）\n- 修复公网直连返回「系统提示：您无权访问此页面」（如机电学院、教务处等）时未自动切换 WebVPN 代理通道的 Bug\n- 包含 v0.2.3-beta.1 全部修复（通知缓存 v2 标题强校验、WebVPN 图片原生代理防裂图、学习通键盘黑屏修复、学习通 2 路小并发 HTTP 提速与 10 分钟缓存）"
                       }
                   ]
 }

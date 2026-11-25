@@ -1155,6 +1155,53 @@ async function runTests() {
   // 第 1 批（courseId 101 & 102）触发 429 熔断后，绝不能再请求第 2 批（courseId 103 & 104）
   assert.equal(riskCalls.some((u) => u.includes('courseId=103') || u.includes('courseId=104')), false)
 
+  // 41. notices.ts: VSB 真实模板（<h1>标题</h1> + <h2>发布时间：...</h2> + vsb_content）毫秒级精准命中
+  const vsbMetaH2Html = `
+    <html><head><title>2026年材料科学与工程学院刘嵩博士论文答辩预告-河南科技大学材料科学与工程学院</title></head><body>
+      <form name="_newscontent_fromname">
+        <h1>2026年材料科学与工程学院刘嵩博士论文答辩预告</h1>
+        <h2>发布时间：2026年11月18日 | 点击：123 次</h2>
+        <div class="txts"><div id="vsb_content"><div class="v_news_content">
+          <p><img src="/__local/F/85/2C/poster.jpg" width="500"></p>
+        </div></div></div>
+      </form>
+    </body></html>
+  `
+  const vsbMetaParsed = parseNoticeBodyHtml(vsbMetaH2Html, 'https://cl.haust.edu.cn/info/1204/21939.htm', {
+    expectedTitle: '2026年材料科学与工程学院刘嵩博士论文答辩预告',
+    expectedId: '21939',
+    expectedUrl: 'https://cl.haust.edu.cn/info/1204/21939.htm',
+    publicCollege: true
+  })
+  assert.equal(vsbMetaParsed.articleMatch, true)
+  assert.deepEqual(vsbMetaParsed.imgs, ['https://cl.haust.edu.cn/__local/F/85/2C/poster.jpg'])
+
+  // 42. notices.ts: 公网直连返回「系统提示：您无权访问此页面」时自动切去 WebVPN 读取正文
+  const jdTried = []
+  const jdVpnFallback = await fetchBodyFast(
+    {
+      getCookies: async () => 'wengine_vpn_ticket=ok',
+      get: async (url) => {
+        jdTried.push(url)
+        if (url === 'https://jd.haust.edu.cn/info/1001/901.htm') {
+          return { status: 200, url, data: '<html><head><title>系统提示</title></head><body><p>您无权访问此页面</p></body></html>' }
+        }
+        return {
+          status: 200,
+          url,
+          data: '<html><body><form name="_newscontent_fromname"><h1>机电学院退学公示</h1><h2>发布时间：2026-11-25</h2><div id="vsb_content"><p>校内公示正文</p></div></form></body></html>'
+        }
+      }
+    },
+    { source: 'jd', sourceName: '机电学院', id: '901', title: '机电学院退学公示', date: '2026-11-25', dept: '机电工程学院', url: 'https://jd.haust.edu.cn/info/1001/901.htm' }
+  )
+  assert.equal(jdVpnFallback.failure, undefined)
+  assert.ok(jdVpnFallback.text.includes('校内公示正文'))
+  assert.deepEqual(jdTried, [
+    'https://jd.haust.edu.cn/info/1001/901.htm',
+    'https://jd-haust-edu-cn-s.haust.edu.cn/info/1001/901.htm'
+  ])
+
   console.log('ALL OFFLINE UNIT TESTS PASSED')
 }
 

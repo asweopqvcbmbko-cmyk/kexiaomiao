@@ -755,39 +755,46 @@ function extractNoticeBody(
     (node: HtmlNode) => node.tag === 'article',
     form
   ]
-  const heading = (node: HtmlNode) => /^(?:h1|h2)$/.test(node.tag) ||
-    ['tit', 'title', 'article-title', 'news_title'].some((name) => hasClass(node, name))
-  const findHeading = (node: HtmlNode) => heading(node) ? node : [...elements(node, true)].find(heading)
+  const heading = (node: HtmlNode) => /^(?:h1|h2|h3)$/.test(node.tag) ||
+    ['tit', 'title', 'article-title', 'news_title', 'bt', 'biaoti'].some((name) => hasClass(node, name))
+  const findHeadings = (node: HtmlNode) => heading(node) ? [node] : [...elements(node, true)].filter(heading)
   const candidates = [...new Set(articleSelectors.flatMap((selector) => nodes.filter(selector)))]
   const containers = candidates.filter((node) => ![...elements(node)].some((child) => candidates.includes(child)))
 
-  const relatedHeading = (content: HtmlNode) => {
-    // VSB and WordPress often put the headline immediately before the rich text.
-    for (let child = content, depth = 0; child.parent && depth < 3; child = child.parent, depth++) {
+  const relatedHeadings = (content: HtmlNode) => {
+    // VSB and WordPress often put the headline (and a meta <h2> like "发布时间：...") before the rich text.
+    const found: HtmlNode[] = []
+    for (let child = content, depth = 0; child.parent && depth < 4; child = child.parent, depth++) {
       const parent = child.parent
       if (/^(?:body|html|main|#document)$/.test(parent.tag)) break
       for (const sibling of parent.children.slice(0, parent.children.indexOf(child)).reverse()) {
         if (typeof sibling === 'string') continue
         if (sibling.tag === 'header' && parent.tag === 'article') {
-          const title = [...elements(sibling)].find(heading)
-          if (title) return title
+          found.push(...[...elements(sibling)].filter(heading))
+          continue
         }
         if (chrome(sibling)) continue
         if (candidates.includes(sibling) || [...elements(sibling)].some((node) => candidates.includes(node))) break
-        const title = findHeading(sibling)
-        if (title) return title
+        found.push(...findHeadings(sibling))
       }
       if (form(parent) || parent.tag === 'article') break
     }
+    return found
   }
 
   const targetTitle = compact(expectedTitle)
-  const titleMatches = (title: string) => !!targetTitle && compact(title) === targetTitle
+  const titleMatches = (title: string) => {
+    const actual = compact(title)
+    if (!targetTitle || !actual) return false
+    if (actual === targetTitle) return true
+    const shorter = Math.min(actual.length, targetTitle.length)
+    return shorter >= 6 && (actual.includes(targetTitle) || targetTitle.includes(actual))
+  }
   const documentTitle = space(textOf(nodes.find((node) => node.tag === 'title')))
   const pageTitle = titleMatches(documentTitle) ? documentTitle :
-    documentTitle.replace(/\s*[-–—_|｜]\s*(?:河南科技大学.*|河科大.*|[^-_|｜]*新闻网|[^-_|｜]*教务处)$/, '')
-  const genericTitle = /^(?:首页|网站首页|校园新闻|全校通知|通知公告|新闻中心|正文|文章详情|河南科技大学(?:[^0-9]{0,24}(?:学院|新闻网|教务处|官网))?)$/
-  const usableTitle = (title: string) => !!compact(title) && (titleMatches(title) || !genericTitle.test(title))
+    documentTitle.replace(/\s*[-–—_|｜]\s*(?:河南科技大学.*|河科大.*|[^-_|｜]*新闻网|[^-_|｜]*教务处|[^-_|｜]*学院.*)$/, '')
+  const metaOrGeneric = /^(?:发布时间|发布日期|时间[：:]|日期[：:]|来源[：:]|作者[：:]|点击[：:]|浏览[：:]|编辑[：:]|当前位置|您当前的位置|首页\s*(?:>|»|\/|-)|系统提示|首页$|网站首页$|校园新闻$|全校通知$|通知公告$|新闻中心$|正文$|文章详情$|河南科技大学(?:[^0-9]{0,24}(?:学院|新闻网|教务处|官网))?$)/
+  const usableTitle = (title: string) => !!compact(title) && (titleMatches(title) || !metaOrGeneric.test(title))
 
   const landed = resolveUrl(baseUrl, baseUrl)
   const requested = expectedUrl ? resolveUrl(expectedUrl, expectedUrl) : undefined
@@ -810,13 +817,20 @@ function extractNoticeBody(
 
   for (const content of containers) {
     if (login || wrongId) break
-    const related = relatedHeading(content)
-    const local = findHeading(content)
-    const headline = [related, local].find((node) => usableTitle(space(textOf(node))))
-    const title = headline ? space(textOf(headline)) : containers.length === 1 && usableTitle(pageTitle) ? pageTitle : ''
+    const related = relatedHeadings(content)
+    const local = findHeadings(content)
+    const headingPool = [...related, ...local].filter((node) => usableTitle(space(textOf(node))))
+    const matchedNode = headingPool.find((node) => titleMatches(space(textOf(node))))
+    const headline = matchedNode || headingPool[0]
+    const headlineText = headline ? space(textOf(headline)) : ''
+    const title = matchedNode
+      ? headlineText
+      : (containers.length === 1 && titleMatches(pageTitle)
+        ? pageTitle
+        : (headlineText || (containers.length === 1 && usableTitle(pageTitle) ? pageTitle : '')))
     if (!titleMatches(title) && !(containers.length === 1 && idMatch && (!title || !targetTitle))) continue
 
-    const text = textOf(content, local === headline ? local : undefined)
+    const text = textOf(content, local.includes(headline) ? headline : undefined)
       .replace(/[ \t\u00a0]+/g, ' ').replace(/\n(?:\s*\n){2,}/g, '\n\n').trim()
     if (form(content) && !headline && !text) continue
     const imgs = new Set<string>()
@@ -858,7 +872,7 @@ function extractNoticeBody(
     }
   }
 
-  const requiresLogin = login || /统一身份认证|统一认证|VPN\s*登录|用户登录|请先登录|登录后查看/.test(pageText)
+  const requiresLogin = login || /统一身份认证|统一认证|VPN\s*登录|用户登录|请先登录|登录后查看|您无权访问此页面|无权访问/.test(pageText)
   return {
     title: '', text: '', imgs: [], attachments: [], date: '', url: baseUrl,
     pageType: requiresLogin ? 'login' : candidates.length ? 'content-unmatched' : 'page',
@@ -1072,23 +1086,22 @@ export async function fetchBodyFast(http: NoticeHttpClient, item: NoticeListItem
   }
   const primary = await attempt(primaryUrl, kindOf(primaryUrl), false, preferDirect && secondaryUrl ? 3500 : undefined)
   if (!primary.failure) return primary
+  let finalFailure = primary
   if (secondaryUrl) {
-    // Even if direct returned network/parse or WebVPN returned auth, try the alternate path before giving up.
-    const shouldTrySecondary = primary.failure !== 'auth' || !isWebVpnHost(safeDomain(secondaryUrl))
-    if (shouldTrySecondary) {
-      const secondary = await attempt(secondaryUrl, kindOf(secondaryUrl))
-      if (!secondary.failure) return secondary
-      if (secondary.failure === 'auth' && primary.failure !== 'auth') return secondary
-    }
+    // Always try the alternate path (direct <-> WebVPN): e.g. public college pages that return
+    // "您无权访问此页面" over direct internet succeed via WebVPN with cookies, and vice versa on campus Wi-Fi.
+    const secondary = await attempt(secondaryUrl, kindOf(secondaryUrl))
+    if (!secondary.failure) return secondary
+    if (secondary.failure === 'auth') finalFailure = secondary
   }
-  if (primary.failure === 'auth' || item.source !== 'jwc') return primary
+  if (finalFailure.failure === 'auth' || item.source !== 'jwc') return finalFailure
   const mirror = item.mirrorUrl && toWebVpnUrl(item.mirrorUrl)
   const mirrorUrl = mirror && asHttpsUrl(mirror, mirror)?.href
   if (mirrorUrl) {
     const result = await attempt(mirrorUrl, 'school-mirror', true)
     if (!result.failure || result.failure === 'auth') return result
   }
-  return primary
+  return finalFailure
 }
 
 export { fetchList, fetchBody, toWebVpnUrl, toDirectUrl, buildCandidateUrls, PORTAL_URL, JWC_LIST, JWC_LIST_DIRECT }
