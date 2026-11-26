@@ -13,6 +13,7 @@ import { browser, engine, overlay } from './engine'
 import { CapacitorHttp, ExceptionCode, registerPlugin } from '@capacitor/core'
 import { retireStudyData } from './retired-study-data'
 import { createAirconElectricityService } from './lib/aircon-electricity'
+import { CWPAY_APP_REFERER, CWPAY_CAS_LOGIN_URL, CWPAY_ORIGIN, createDormElectricityService } from './lib/dorm-electricity'
 import type { NoticeHttpClient } from './lib/notices'
 import type { ChaoxingHttpClient } from './lib/chaoxing'
 import {
@@ -253,9 +254,10 @@ function keys(): string[] {
   return out
 }
 
-/** 清理与当前教务账号绑定的缓存（课表/考试/校园卡/会话/空调认证令牌），保留宿舍空调房间绑定配置 */
+/** 清理与当前教务账号绑定的缓存（课表/考试/校园卡/会话/空调认证令牌/宿舍支付CSRF），保留宿舍房间绑定配置 */
 function clearAccountCache() {
   noticeSessionVersion += 1
+  dormElectricityService?.resetSession?.()
   for (const key of ['courses', 'exams', 'card', 'session', 'aircon.jwt']) {
     try {
       localStorage.removeItem(K(key))
@@ -342,7 +344,8 @@ async function clearSchoolCookies(): Promise<boolean> {
   const result = await browser.clearCookiesForHosts({ hosts: [
     'haust.edu.cn', 'www-haust-edu-cn-s.haust.edu.cn', 'i-haust-edu-cn-s.haust.edu.cn',
     'jwc-haust-edu-cn-s.haust.edu.cn', 'jwgl-haust-edu-cn-s.haust.edu.cn',
-    'cas-haust-edu-cn-s.haust.edu.cn', 'cas.haust.edu.cn', 'cl.haust.edu.cn'
+    'cas-haust-edu-cn-s.haust.edu.cn', 'cas.haust.edu.cn', 'cl.haust.edu.cn',
+    'cwpay.haust.edu.cn'
   ].join(',') })
   return !!result?.ok
 }
@@ -940,6 +943,135 @@ const readAircon = createCloudPaymentSession(async (url, headers) => {
   return browser.airconAuthBootstrap({ idToken: tok.token, userAgent, cookieUrl })
 })
 
+const isCwpayReadyUrl = (url: string) =>
+  !!url && url.startsWith(CWPAY_ORIGIN + '/xysf/') && !/(?:login|CasLogin)\.aspx/i.test(url)
+
+async function ensureCwpayInHiddenWebView(): Promise<boolean> {
+  const readHiddenUrl = async () => {
+    const cur = (await browser.currentUrl().catch(() => ({ url: '' }))) as { url?: string; hiddenUrl?: string }
+    return cur.hiddenUrl || cur.url || ''
+  }
+  // 1. 与空调电费完全一致：复用 casTokenLogin 签发的 30 天 idToken，通过 X-Id-Token 直接免密过公网 CAS（零验证码）
+  const tok = await fetchAirconIdToken().catch(() => ({ token: '' }))
+  if (tok.token) {
+    const ssoUrl = `https://cas.haust.edu.cn/cas/login?service=${encodeURIComponent(CWPAY_CAS_LOGIN_URL)}`
+    const ssoRes = await browser.load({ url: ssoUrl, idToken: tok.token, timeoutMs: 15_000 }).catch(() => ({ url: '' }))
+    const ssoLanded = ssoRes?.url || (await readHiddenUrl())
+    if (isCwpayReadyUrl(ssoLanded)) return true
+  }
+  // 2. 兜底：若 CAS Cookie 已在或无 idToken，尝试直接访问 CasLogin.aspx 并按需自动填表
+  let landed = await engine.load(CWPAY_CAS_LOGIN_URL, 15_000)
+  if (isCwpayReadyUrl(landed)) return true
+  if (isCasPage(landed)) {
+    if (autoLoginTripped) return false
+    const cred = await readCred().catch(() => null)
+    if (!cred?.username || !cred?.password) return false
+    const fillRes = await engine.run(fillJs(cred)).catch(() => 'error')
+    if (fillRes === 'abort-risk' || fillRes === 'abort-captcha') {
+      autoLoginTripped = true
+      return false
+    }
+    if (fillRes === 'filled' || fillRes === 'filled+clicked') {
+      const deadline = Date.now() + 12_000
+      while (Date.now() < deadline) {
+        await sleep(500)
+        const nowUrl = await readHiddenUrl()
+        if (isCwpayReadyUrl(nowUrl)) return true
+        if (nowUrl && /login\.aspx/i.test(nowUrl)) break
+      }
+    }
+  }
+  const finalUrl = await readHiddenUrl()
+  return isCwpayReadyUrl(finalUrl)
+}
+
+let cwpayFetchSeq = 0
+
+async function cwpayWebViewPost(url: string, body: unknown, headers: Record<string, string>) {
+  const cur = (await browser.currentUrl().catch(() => ({ url: '' }))) as { url?: string; hiddenUrl?: string }
+  const curUrl = cur.hiddenUrl || cur.url || ''
+  if (!isCwpayReadyUrl(curUrl)) {
+    const loaded = await engine.load(CWPAY_APP_REFERER, 12_000)
+    if (!isCwpayReadyUrl(loaded)) {
+      return { status: 401, url: loaded || url, data: '', error: 'auth' as const }
+    }
+  }
+  const reqHeaders: Record<string, string> = {
+    'Content-Type': 'application/json; charset=UTF-8',
+    Accept: 'application/json, text/plain, */*',
+    'X-Requested-With': 'XMLHttpRequest'
+  }
+  if (headers['x-csrfToken']) reqHeaders['x-csrfToken'] = headers['x-csrfToken']
+  const slotKey = `__haustCwpayFetch_${++cwpayFetchSeq}`
+  await engine.run(`(() => {
+    const key = ${JSON.stringify(slotKey)};
+    const box = window[key] = {};
+    if (location.origin !== ${JSON.stringify(CWPAY_ORIGIN)}) {
+      box.value = { status: 401, url: location.href, data: '', error: 'auth' };
+      return true;
+    }
+    const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(() => ctrl.abort(), 14000) : null;
+    fetch(${JSON.stringify(url)}, {
+      method: 'POST',
+      credentials: 'include',
+      headers: ${JSON.stringify(reqHeaders)},
+      body: ${JSON.stringify(JSON.stringify(body ?? {}))},
+      ...(ctrl ? { signal: ctrl.signal } : {})
+    }).then(async (res) => {
+      if (timer) clearTimeout(timer);
+      if (res.type === 'opaqueredirect') {
+        box.value = { status: 401, url: res.url || ${JSON.stringify(url)}, data: '', error: 'auth' };
+        return;
+      }
+      const text = await res.text();
+      box.value = { status: res.status, url: res.url || ${JSON.stringify(url)}, data: text };
+    }).catch((err) => {
+      if (timer) clearTimeout(timer);
+      const isAbort = !!(err && err.name === 'AbortError');
+      box.value = {
+        status: isAbort ? 504 : 0,
+        url: ${JSON.stringify(url)},
+        data: String(err && err.message || (isAbort ? 'timeout' : 'network')),
+        error: isAbort ? 'timeout' : 'network'
+      };
+    });
+    return true;
+  })()`)
+  const deadline = Date.now() + 15_000
+  try {
+    while (Date.now() < deadline) {
+      const raw = await engine.run(`(() => {
+        const key = ${JSON.stringify(slotKey)};
+        const v = window[key] && window[key].value;
+        if (v === undefined) return 'null';
+        try { delete window[key]; } catch (_) {}
+        return JSON.stringify(v);
+      })()`)
+      if (typeof raw === 'string' && raw !== 'null') {
+        try {
+          return JSON.parse(raw) as { status: number; url: string; data: string; error?: 'network' | 'timeout' | 'auth' }
+        } catch {
+          return { status: 500, url, data: '', error: 'network' as const }
+        }
+      }
+      await sleep(150)
+    }
+    return { status: 504, url, data: '', error: 'timeout' as const }
+  } finally {
+    void engine.run(`(() => { try { delete window[${JSON.stringify(slotKey)}]; } catch (_) {} return true; })()`).catch(() => {})
+  }
+}
+
+const dormHttpClient = {
+  runTransaction: <T,>(fn: () => Promise<T>) => withEngine(fn),
+  post: (url: string, body: unknown, headers: Record<string, string> = {}) =>
+    cwpayWebViewPost(url, body, headers),
+  ensureSession: () => ensureCwpayInHiddenWebView().catch(() => false)
+}
+
+const dormElectricityService = createDormElectricityService(localStorage, dormHttpClient)
+
 let studyMigration: Promise<void> | undefined
 let chaoxingCacheVersion = 0
 let chaoxingReloginGeneration = 0
@@ -1231,6 +1363,7 @@ export const androidApi = {
   },
 
   airconElectricity: createAirconElectricityService(localStorage, readAircon),
+  dormElectricity: dormElectricityService,
   /* 状态判定也要排队：它同样会 load 隐藏 WebView，插队会把别人的页面顶掉 */
   status: () =>
     withEngine(async () => {
@@ -1514,6 +1647,25 @@ export const androidApi = {
     emitSession({ loggedIn: false, verified: true, checkedAt: new Date().toISOString() })
     return results.every((result) => result.status === 'fulfilled' && result.value !== false)
   })),
+  clearChaoxing: () => withEngine(async () => {
+    chaoxingCacheVersion += 1
+    const results = await Promise.allSettled([
+      clearSavedChaoxingCred(),
+      browser.clearCookiesForHosts({ hosts: CHAOXING_HOSTS }).then(({ ok }) => ok)
+    ])
+    try {
+      const cur = (await browser.currentUrl()) as { url?: string; hiddenUrl?: string }
+      const targetUrl = cur.hiddenUrl || cur.url || ''
+      if (targetUrl && /\.chaoxing\.com/i.test(targetUrl)) {
+        await engine.load('about:blank', 3000).catch(() => {})
+      }
+    } catch (_) {}
+    clearChaoxingCache()
+    localStorage.removeItem(CHAOXING_LAST_ACCOUNT_KEY)
+    resetChaoxingAutoLogin()
+    chaoxingAutoLoginTripped = results[0].status === 'rejected'
+    return results.every((result) => result.status === 'fulfilled' && result.value !== false)
+  }),
 
   /* 教务凭据：保存后登录时自动填（学校登录链要过两道 CAS） */
   credStatus: () => withEngine(async () => {

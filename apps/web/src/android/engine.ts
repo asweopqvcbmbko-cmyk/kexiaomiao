@@ -6,7 +6,7 @@
 import { registerPlugin } from '@capacitor/core'
 
 type Plugin = {
-  load(o: { url: string; timeoutMs?: number; referer?: string }): Promise<{ url: string; timeout?: boolean }>
+  load(o: { url: string; timeoutMs?: number; referer?: string; idToken?: string }): Promise<{ url: string; timeout?: boolean }>
   eval(o: { js: string }): Promise<{ value: any }>
   evalOverlay(o: { js: string }): Promise<{ value: any }>
   currentUrl(): Promise<{ url: string }>

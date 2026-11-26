@@ -21,12 +21,14 @@ import {
 import { useAndroidBack, useToast } from './hooks'
 import { Home } from './pages/Home'
 import { DormBinding } from './components/DormBinding'
+import { DormElecBinding } from './components/DormElecBinding'
+import { ImmersiveUpdateView } from './components/ImmersiveUpdateView'
 import { Onboarding } from './components/Onboarding'
 import { Dashboard, useChaoxingCourseData } from './pages/Dashboard'
 import { Schedule } from './pages/Schedule'
-import { Profile } from './pages/Profile'
+import { Profile, type ProfileSubPage } from './pages/Profile'
 import { CardPage, ChargersPage, ExamPage, NoticesPage } from './pages/Subs'
-import { data, events, isConnected, isNativePlatform, supportsChaoxing, supportsNativeAuth } from './api'
+import { data, events, isConnected, isNativePlatform, supportsChaoxing, supportsDormElectricity, supportsNativeAuth } from './api'
 import {
   COLLEGES, MAX_SUBSCRIBED_COLLEGES, isCollegeSource, readSubscribedColleges, writeSubscribedColleges
 } from './college-notices'
@@ -37,6 +39,7 @@ import {
   clearHomeSnapshot,
   dismissDemoTipFlag,
   fingerprintAircon,
+  fingerprintDorm,
   fingerprintCard,
   fingerprintChargers,
   fingerprintExam,
@@ -67,6 +70,7 @@ import {
 import { applyTheme, readTheme, watchSystemTheme, type Theme } from './theme'
 import type { AuthOptions, AuthRequest, CardInfo, ChaoxingDashboard, ChargerData, CourseTable, Exam, NoticeBody, NoticeItem, SchoolLogin, SessionStatus } from './types'
 import type { AirconRoom, AirconElectricityResult } from './types/aircon-electricity'
+import type { DormRoom, DormElectricityResult } from './types/dorm-electricity'
 
 type Tab = AppTab
 type Sub = null | 'schedule' | 'chargers' | 'card' | 'exam'
@@ -80,7 +84,7 @@ const NAV: Array<[Tab, string, string]> = [
   ['home', '首页', 'home'],
   ['dashboard', '仪表盘', 'grid'],
   ['notices', '通知', 'bell'],
-  ['profile', '我的', 'user']
+  ['profile', '设置', 'settings']
 ]
 
 function lsGet<T>(key: string, dflt: T): T {
@@ -463,17 +467,24 @@ export default function App() {
     | { kind: 'collegeSubscriptions'; draft: string[] }
     | { kind: 'theme' }
     | { kind: 'aircon' }
+    | { kind: 'dorm' }
     | { kind: 'about' }
     | { kind: 'updateSettings' }
     | { kind: 'updateAvailable' }
     | { kind: 'schoolLogin'; returnToNotice?: NoticeItem }
     | { kind: 'chaoxingLogin' }
+    | { kind: 'logoutChaoxing' }
   >(null)
   const [updateSettings, setUpdateSettings] = useState<UpdateSettings>(() => readUpdateSettings())
   const [appVersion, setAppVersion] = useState<AppVersionInfo>({ versionCode: 11, versionName: '0.1.10' })
   const [availableUpdate, setAvailableUpdate] = useState<ReleaseAsset | null>(null)
   const [updateChecking, setUpdateChecking] = useState(false)
   const [updateStatusHint, setUpdateStatusHint] = useState('')
+  const [profileSubPage, setProfileSubPage] = useState<ProfileSubPage>('root')
+  const [immersiveUpdateOpen, setImmersiveUpdateOpen] = useState(false)
+  const immersiveUpdateOpenRef = useRef(immersiveUpdateOpen)
+  immersiveUpdateOpenRef.current = immersiveUpdateOpen
+  const immersiveUpdateBackRef = useRef<(() => boolean) | null>(null)
   const autoCheckedRef = useRef(false)
   const [noticeBodyState, setNoticeBodyState] = useState<{ loading: boolean; body: NoticeBody | null }>({
     loading: false,
@@ -511,22 +522,25 @@ export default function App() {
         setAvailableUpdate(res.release)
         if (!opts?.silent) {
           setUpdateStatusHint(`发现新版本 v${res.release.versionName}`)
-          setModal({ kind: 'updateAvailable' })
+          if (!immersiveUpdateOpenRef.current) setModal({ kind: 'updateAvailable' })
         } else if (res.release.versionName !== activeSettings.ignoredVersion) {
-          setModal((prev) => prev ?? { kind: 'updateAvailable' })
+          if (!immersiveUpdateOpenRef.current) setModal((prev) => prev ?? { kind: 'updateAvailable' })
         }
       } else if (!opts?.silent) {
         setAvailableUpdate(null)
         if (res.status === 'up_to_date') {
-          setUpdateStatusHint(`当前 v${res.current.versionName} 已是最新版本`)
+          const msg = `当前 v${res.current.versionName} 已是最新版本`
+          setUpdateStatusHint(msg)
+          toast(msg)
         } else {
           setUpdateStatusHint(res.message)
+          toast(res.message)
         }
       }
     } finally {
       if (!opts?.silent) setUpdateChecking(false)
     }
-  }, [updateSettings])
+  }, [toast, updateSettings])
 
   useEffect(() => {
     if (onboardingOpen || autoCheckedRef.current || !supportsAppUpdater()) return
@@ -550,6 +564,13 @@ export default function App() {
     () => initialDemo?.airconResult ?? boot.snapshot?.airconResult ?? null
   )
   const airconRequest = useRef(0)
+  const [dormRoom, setDormRoom] = useState<DormRoom | null>(
+    () => (boot.demoMode ? null : boot.snapshot?.dormRoom ?? null)
+  )
+  const [dormResult, setDormResult] = useState<DormElectricityResult | null>(
+    () => (boot.demoMode ? null : boot.snapshot?.dormResult ?? null)
+  )
+  const dormRequest = useRef(0)
   const demoModeRef = useRef(demoMode)
   demoModeRef.current = demoMode
   const onboardingOpenRef = useRef(onboardingOpen)
@@ -584,10 +605,42 @@ export default function App() {
     return true
   }
 
+  const refreshDorm = useCallback(async (opts?: { silent?: boolean }) => {
+    if (demoModeRef.current || onboardingOpenRef.current) return
+    const request = ++dormRequest.current
+    setSwrCards((prev) => ({ ...prev, dorm: true }))
+    try {
+      const [room, result] = await Promise.all([data.dormRoom(), data.dormElectricity()])
+      if (request === dormRequest.current && !demoModeRef.current) {
+        const nextRoom = result?.status === 'ok' ? result.reading.room : room
+        setDormRoom(nextRoom)
+        setDormResult(result)
+        syncTimesRef.current.dorm = Date.now()
+        updateFingerprint('dorm', fingerprintDorm(nextRoom, result), !!opts?.silent || !!fpRef.current.dorm)
+      }
+    } finally {
+      if (request === dormRequest.current) {
+        setSwrCards((prev) => ({ ...prev, dorm: false }))
+      }
+    }
+  }, [updateFingerprint])
+
+  const saveDormBinding = async (room: DormRoom) => {
+    const session = schoolSession.current
+    const request = ++dormRequest.current
+    if (!await data.saveDormRoom(room)) return false
+    if (session !== schoolSession.current || request !== dormRequest.current || demoModeRef.current) return false
+    setDormRoom(room)
+    setDormResult(null)
+    setModal((current) => current?.kind === 'dorm' ? null : current)
+    void refreshDorm()
+    return true
+  }
+
   /* ---------------- 持久化首帧快照（仅真实模式） ---------------- */
   useEffect(() => {
     if (onboardingOpen || demoMode) return
-    const hasAny = !!(status?.loggedIn || table?.courses?.length || notices.length || chargers || card || airconRoom)
+    const hasAny = !!(status?.loggedIn || table?.courses?.length || notices.length || chargers || card || airconRoom || dormRoom)
     if (!hasAny) return
     writeHomeSnapshot({
       status,
@@ -598,10 +651,12 @@ export default function App() {
       card,
       airconRoom,
       airconResult,
+      dormRoom,
+      dormResult,
       lastSync,
       syncTimes: { ...syncTimesRef.current }
     })
-  }, [onboardingOpen, demoMode, status, table, exams, notices, chargers, card, airconRoom, airconResult, lastSync])
+  }, [onboardingOpen, demoMode, status, table, exams, notices, chargers, card, airconRoom, airconResult, dormRoom, dormResult, lastSync])
 
   /* ---------------- 加载真实数据 ---------------- */
   const applyCached = useCallback((c: Record<string, unknown> | null) => {
@@ -793,6 +848,7 @@ export default function App() {
     }
     void refreshAll({ force: true })
     void refreshAircon({ silent: true })
+    void refreshDorm({ silent: true })
   }
 
   /* ---------------- Android 返回键拦截栈（引导页最高优先级） ---------------- */
@@ -810,12 +866,24 @@ export default function App() {
       // 冷启动引导第 1 屏按返回键：交给系统退出应用，严禁绕过引导进入主页
       return false
     }
+    if (immersiveUpdateOpen) {
+      if (immersiveUpdateBackRef.current) {
+        return immersiveUpdateBackRef.current()
+      }
+      setImmersiveUpdateOpen(false)
+      return true
+    }
     if (modal) {
       setModal(modal.kind === 'schoolLogin' && modal.returnToNotice ? { kind: 'notice', item: modal.returnToNotice } : null)
       return true
     }
     if (sub) {
       setSub(null)
+      window.scrollTo({ top: 0 })
+      return true
+    }
+    if (tab === 'profile' && profileSubPage !== 'root') {
+      setProfileSubPage(profileSubPage === 'about' ? 'root' : 'about')
       window.scrollTo({ top: 0 })
       return true
     }
@@ -846,8 +914,9 @@ export default function App() {
       if (!alive || demoModeRef.current) return
       applyCached(cached)
       const now = Date.now()
-      // 有本地快照时仅按分层 TTL 静默重验证；空调仅在已绑定或未拉取过房间配置时检查
+      // 有本地快照时仅按分层 TTL 静默重验证；空调/宿舍电费仅在已绑定或未拉取过房间配置时检查
       void refreshAircon({ silent: true })
+      void refreshDorm({ silent: true })
       const times = syncTimesRef.current
       const hasWarm = !!(boot.snapshot?.status?.loggedIn || (cached as any)?.session?.loggedIn)
       if (hasWarm) {
@@ -862,17 +931,23 @@ export default function App() {
       if (demoModeRef.current) return
       if (!st.loggedIn && loginRunning.current) {
         schoolSession.current += 1
+        dormRequest.current += 1
         setTable(null)
         setExams([])
         setCard(null)
+        setDormResult(null)
+        syncTimesRef.current.dorm = 0
         setCourseError('')
         clearHomeSnapshot()
       }
       setStatus((prev) => {
         if (prev?.studentName && st.studentName && prev.studentName !== st.studentName) {
+          dormRequest.current += 1
           setTable(null)
           setExams([])
           setCard(null)
+          setDormResult(null)
+          syncTimesRef.current.dorm = 0
           setCourseError('')
         }
         return st
@@ -896,10 +971,13 @@ export default function App() {
       if (Date.now() - syncTimesRef.current.aircon >= SWR_FAST_TTL_MS) {
         void refreshAircon({ silent: true })
       }
+      if (Date.now() - (syncTimesRef.current.dorm ?? 0) >= SWR_FAST_TTL_MS) {
+        void refreshDorm({ silent: true })
+      }
     }
     document.addEventListener('visibilitychange', onVis)
     return () => document.removeEventListener('visibilitychange', onVis)
-  }, [refreshAll, refreshAircon])
+  }, [refreshAll, refreshAircon, refreshDorm])
 
   /* 周次锚点：拿到教务当前周就刷新；日期按「锚点周 + 偏移」推算 */
   useEffect(() => {
@@ -1073,11 +1151,14 @@ export default function App() {
     setCard(null)
     setAirconRoom(null)
     setAirconResult(null)
+    dormRequest.current += 1
+    setDormRoom(null)
+    setDormResult(null)
     setChaoxingDash(readChaoxingSnapshot())
     setStatus(null)
     setCourseError('')
     fpRef.current = {}
-    syncTimesRef.current = { academic: 0, notices: 0, card: 0, chargers: 0, aircon: 0 }
+    syncTimesRef.current = { academic: 0, notices: 0, card: 0, chargers: 0, aircon: 0, dorm: 0 }
   }, [])
 
   /* ---------------- 学习通仪表盘 ---------------- */
@@ -1203,9 +1284,12 @@ export default function App() {
         if (wasDemo) {
           exitDemoState()
         } else if (options?.username || (prevName && st.studentName && prevName !== st.studentName)) {
+          dormRequest.current += 1
           setTable(null)
           setExams([])
           setCard(null)
+          setDormResult(null)
+          syncTimesRef.current.dorm = 0
           setCourseError('')
         }
         setStatus(st)
@@ -1213,6 +1297,7 @@ export default function App() {
         toast(options?.remember && !st.credentialSaved ? '已登录，凭据未保存，正在同步' : '已登录，正在同步课表与通知')
         void refreshAll({ force: true, knownStatus: st })
         void refreshAircon({ silent: true })
+        void refreshDorm({ silent: true })
         return st
       }
       setSyncStage('')
@@ -1256,10 +1341,14 @@ export default function App() {
       if (options.signal.aborted || !result.ok) return result
       if (demoModeRef.current) exitDemoState()
       if (result.platform === 'school') {
+        dormRequest.current += 1
+        setDormResult(null)
+        syncTimesRef.current.dorm = 0
         setStatus(result.session)
         setCourseError('')
         void refreshAll({ force: true, knownStatus: result.session })
         void refreshAircon({ silent: true })
+        void refreshDorm({ silent: true })
         if (school && request.remember && !result.session.credentialSaved) toast('已登录，凭据未保存')
       } else {
         setChaoxingDash(result.dashboard)
@@ -1399,6 +1488,37 @@ export default function App() {
         </Modal>
       )
     }
+    if (modal.kind === 'dorm') {
+      const openWoIHaust = async () => {
+        const res = await data.launchApp('com.lantu.MobileCampus.haust')
+        if (res.launched) {
+          setModal(null)
+        } else {
+          toast('未检测到「我i科大」App，请先安装后再打开')
+        }
+      }
+      return (
+        <Modal title={dormRoom ? '更改宿舍电费房间' : '绑定宿舍电费房间'} onClose={() => setModal(null)}>
+          <DormElecBinding
+            room={dormRoom}
+            onSave={saveDormBinding}
+            onLogin={() => {
+              setModal(null)
+              onLoginTap()
+            }}
+          />
+          {isNativePlatform() ? (
+            <button
+              className="softbtn"
+              style={{ width: '100%', marginTop: 12 }}
+              onClick={() => void openWoIHaust()}
+            >
+              打开「我i科大」充值宿舍电费
+            </button>
+          ) : null}
+        </Modal>
+      )
+    }
     if (modal.kind === 'schoolLogin' || modal.kind === 'chaoxingLogin') {
       const school = modal.kind === 'schoolLogin'
       const notice = modal.kind === 'schoolLogin' ? modal.returnToNotice : undefined
@@ -1517,6 +1637,37 @@ export default function App() {
     }
     if (modal.kind === 'theme') return <ThemeModal theme={theme} onChange={setTheme} onClose={() => setModal(null)} />
     if (modal.kind === 'about') return <AboutModal connected={isConnected()} onClose={() => setModal(null)} />
+    if (modal.kind === 'logoutChaoxing') {
+      return (
+        <Modal title="退出学习通" onClose={() => setModal(null)}>
+          <p className="bodycopy">
+            退出后将仅清除学习通的登录会话、Cookie、已保存凭据和本地任务缓存，避免考试期间触发多端检测。
+          </p>
+          <p className="bodycopy" style={{ marginTop: 6, color: 'var(--muted)' }}>
+            教务课表、考试安排、空调/宿舍电费和校园卡的登录态将完整保留。
+          </p>
+          <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+            <button type="button" className="softbtn" style={{ flex: 1 }} onClick={() => setModal(null)}>
+              取消
+            </button>
+            <button
+              type="button"
+              className="primary"
+              style={{ flex: 1, background: 'var(--danger)' }}
+              onClick={async () => {
+                setModal(null)
+                const ok = await data.clearChaoxing()
+                clearChaoxingState()
+                if (ok) toast('已退出学习通，教务与电费登录态已保留')
+                else toast('已清理本地学习通缓存，部分 Cookie 清理失败请重试')
+              }}
+            >
+              确认退出
+            </button>
+          </div>
+        </Modal>
+      )
+    }
     if (modal.kind === 'updateSettings') {
       return (
         <UpdateSettingsModal
@@ -1687,6 +1838,8 @@ export default function App() {
           card={cdView}
           room={airconRoom}
           electricity={airconResult}
+          dormRoom={dormRoom}
+          dormElectricity={dormResult}
           onOpenChargers={() => setSub('chargers')}
           onOpenCard={() => setSub('card')}
           onBindRoom={() => {
@@ -1697,6 +1850,14 @@ export default function App() {
             }
             setModal({ kind: 'aircon' })
           }}
+          onBindDormRoom={supportsDormElectricity() ? () => {
+            if (demoMode) {
+              toast('请先登录校园账号，再绑定你的真实宿舍')
+              onLoginTap()
+              return
+            }
+            setModal({ kind: 'dorm' })
+          } : undefined}
           noticeUnread={unread}
           onOpenSchedule={() => setSub('schedule')}
           onExam={() => setSub('exam')}
@@ -1716,6 +1877,7 @@ export default function App() {
           supported={supportsChaoxing()}
           onRefresh={() => void refreshChaoxing({ force: true })}
           onLogin={() => void loginChaoxing()}
+          onLogout={() => setModal({ kind: 'logoutChaoxing' })}
           onOpenItem={openChaoxingItem}
           onLaunchApp={() => void launchChaoxingApp()}
         />
@@ -1733,6 +1895,10 @@ export default function App() {
         onRefresh={manualRefresh}
         onLogin={onLoginTap}
         onReplayOnboarding={replayOnboarding}
+        chaoxingSupported={supportsChaoxing()}
+        chaoxingLoggedIn={!!chaoxingDash?.loggedIn && !demoMode}
+        onLogoutChaoxing={() => setModal({ kind: 'logoutChaoxing' })}
+        onOpenExternal={(url) => void data.openExternal(url)}
         onClearCache={async () => {
           await data.clearCache()
           clearChaoxingState()
@@ -1752,12 +1918,16 @@ export default function App() {
             toast('清除登录凭据失败，请重试')
             return
           }
+          schoolSession.current += 1
+          dormRequest.current += 1
           await data.clearCache()
           clearChaoxingState()
           clearHomeSnapshot()
           setTable(null)
           setExams([])
           setCard(null)
+          setDormResult(null)
+          syncTimesRef.current.dorm = 0
           setCourseError('')
           setStatus(null)
           toast('已清除登录凭据与账号缓存')
@@ -1770,8 +1940,11 @@ export default function App() {
         onOpenAbout={() => setModal({ kind: 'about' })}
         onOpenUpdateSettings={() => {
           setUpdateStatusHint('')
-          setModal({ kind: 'updateSettings' })
+          setImmersiveUpdateOpen(true)
         }}
+        onToast={toast}
+        subPage={profileSubPage}
+        onSubPageChange={setProfileSubPage}
         appVersionName={appVersion.versionName}
         hasUpdate={!!availableUpdate}
       />
@@ -1833,7 +2006,7 @@ export default function App() {
           </PullToRefresh>
         </main>
       </div>
-      <nav className={`mobile-nav${sub ? ' in-sub' : ''}`} aria-label="主导航">
+      <nav className={`mobile-nav${sub || (tab === 'profile' && profileSubPage !== 'root') ? ' in-sub' : ''}`} aria-label="主导航">
         <span
           className="mobile-nav-pill"
           aria-hidden="true"
@@ -1844,6 +2017,28 @@ export default function App() {
         {navButtons}
       </nav>
       {renderModal()}
+      <ImmersiveUpdateView
+        open={immersiveUpdateOpen}
+        settings={updateSettings}
+        currentVersion={appVersion}
+        release={availableUpdate}
+        checking={updateChecking}
+        statusHint={updateStatusHint}
+        onChangeSettings={(next) => {
+          const saved = writeUpdateSettings(next)
+          setUpdateSettings(saved)
+          setUpdateStatusHint('')
+        }}
+        onCheckNow={() => void runUpdateCheck({ silent: false })}
+        onIgnore={(versionName) => {
+          const saved = writeUpdateSettings({ ...updateSettings, ignoredVersion: versionName })
+          setUpdateSettings(saved)
+          toast(`已忽略 v${versionName} 的提醒`)
+        }}
+        onOpenExternal={(url) => void data.openExternal(url)}
+        onClose={() => setImmersiveUpdateOpen(false)}
+        backHandlerRef={immersiveUpdateBackRef}
+      />
       {toastMsg ? <div className="toast" role="status" aria-live="polite">{toastMsg}</div> : null}
     </>
   )

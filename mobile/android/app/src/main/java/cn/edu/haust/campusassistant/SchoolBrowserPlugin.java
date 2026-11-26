@@ -1302,10 +1302,79 @@ public class SchoolBrowserPlugin extends Plugin {
         String url = call.getString("url");
         int timeout = call.getInt("timeoutMs", 45000);
         String referer = call.getString("referer", "");
+        String idToken = call.getString("idToken", "");
         if (url == null || url.isEmpty()) {
             call.reject("url required");
             return;
         }
+        if (idToken != null && !idToken.isEmpty()) {
+            Uri parsed = Uri.parse(url);
+            int port = parsed.getPort();
+            String path = parsed.getPath();
+            boolean validCasLogin = "https".equalsIgnoreCase(parsed.getScheme())
+                    && "cas.haust.edu.cn".equalsIgnoreCase(parsed.getHost())
+                    && (port == -1 || port == 443)
+                    && ("/cas/login".equals(path) || "/cas/login/".equals(path));
+            if (!validCasLogin) {
+                call.reject("idToken only allowed for https://cas.haust.edu.cn/cas/login");
+                return;
+            }
+            // 在非重定向 HttpURLConnection 中携带 X-Id-Token 换取一次性 ticket，严禁把 X-Id-Token 暴露给 WebView 重定向链
+            new Thread(() -> {
+                HttpURLConnection conn = null;
+                try {
+                    conn = (HttpURLConnection) new URL(url).openConnection();
+                    conn.setInstanceFollowRedirects(false);
+                    conn.setRequestMethod("GET");
+                    conn.setConnectTimeout(Math.min(12000, Math.max(5000, timeout)));
+                    conn.setReadTimeout(Math.min(12000, Math.max(5000, timeout)));
+                    conn.setRequestProperty("User-Agent", UA);
+                    conn.setRequestProperty("X-Id-Token", idToken);
+                    String casCookies = CookieManager.getInstance().getCookie("https://cas.haust.edu.cn/cas/login");
+                    if (casCookies != null && !casCookies.isEmpty()) {
+                        conn.setRequestProperty("Cookie", casCookies);
+                    }
+                    int code = conn.getResponseCode();
+                    CookieManager cm = CookieManager.getInstance();
+                    java.util.List<String> setCookies = conn.getHeaderFields().get("Set-Cookie");
+                    if (setCookies == null) setCookies = conn.getHeaderFields().get("set-cookie");
+                    if (setCookies != null) {
+                        for (String sc : setCookies) {
+                            if (sc != null && !sc.isEmpty()) cm.setCookie("https://cas.haust.edu.cn/", sc);
+                        }
+                        cm.flush();
+                    }
+                    String location = conn.getHeaderField("Location");
+                    if (code >= 300 && code < 400 && location != null && !location.isEmpty()) {
+                        Uri locUri = Uri.parse(location);
+                        String locHost = locUri.getHost() != null ? locUri.getHost().toLowerCase() : "";
+                        int locPort = locUri.getPort();
+                        if ("https".equalsIgnoreCase(locUri.getScheme())
+                                && (locPort == -1 || locPort == 443)
+                                && (locHost.equals("haust.edu.cn") || locHost.endsWith(".haust.edu.cn"))) {
+                            loadInHiddenWebView(location, timeout, "", call);
+                            return;
+                        }
+                    }
+                    JSObject ret = new JSObject();
+                    ret.put("url", location != null ? location : url);
+                    ret.put("authRequired", true);
+                    call.resolve(ret);
+                } catch (Exception e) {
+                    JSObject ret = new JSObject();
+                    ret.put("url", "load-error:-1:" + e.getMessage());
+                    ret.put("error", e.getMessage());
+                    call.resolve(ret);
+                } finally {
+                    if (conn != null) conn.disconnect();
+                }
+            }).start();
+            return;
+        }
+        loadInHiddenWebView(url, timeout, referer, call);
+    }
+
+    private void loadInHiddenWebView(String url, int timeout, String referer, PluginCall call) {
         getActivity().runOnUiThread(() -> {
             try {
                 WebView wv = ensureHidden();
@@ -1351,7 +1420,9 @@ public class SchoolBrowserPlugin extends Plugin {
                 }, Math.max(5000, timeout));
                 hiddenUrl = url;
                 if (referer != null && !referer.isEmpty()) {
-                    wv.loadUrl(url, Collections.singletonMap("Referer", referer));
+                    java.util.Map<String, String> extraHeaders = new java.util.HashMap<>();
+                    extraHeaders.put("Referer", referer);
+                    wv.loadUrl(url, extraHeaders);
                 } else {
                     wv.loadUrl(url);
                 }
@@ -1562,24 +1633,46 @@ public class SchoolBrowserPlugin extends Plugin {
                     }
                 }
                 List<String[]> removals = new ArrayList<>();
+                Set<String> seenRemovals = new LinkedHashSet<>();
+                String[] haustPaths = {"/", "/xysf/", "/xysf/aAppPage/", "/xysf/api/", "/eams/", "/cas/"};
+                String[] chaoxingPaths = {"/", "/work/", "/exam-ans/", "/v2/", "/widget/", "/mycourse/"};
                 for (String host : hosts) {
-                    String url = "https://" + host + "/";
-                    String cookie = cm.getCookie(url);
-                    if (cookie == null || cookie.isEmpty()) continue;
-                    String root = host.equals("haust.edu.cn") || host.endsWith(".haust.edu.cn")
-                            ? ".haust.edu.cn" : ".chaoxing.com";
-                    for (String pair : cookie.split(";")) {
-                        int eq = pair.indexOf('=');
-                        if (eq <= 0) continue;
-                        String name = pair.substring(0, eq).trim();
-                        if (!name.matches("[A-Za-z0-9_-]+")) continue;
-                        String expired = name + "=; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/";
-                        removals.add(new String[]{url, expired});
-                        removals.add(new String[]{url, expired + "; Secure"});
-                        removals.add(new String[]{url, expired + "; Domain=" + host});
-                        removals.add(new String[]{url, expired + "; Domain=" + host + "; Secure"});
-                        removals.add(new String[]{url, expired + "; Domain=" + root});
-                        removals.add(new String[]{url, expired + "; Domain=" + root + "; Secure"});
+                    boolean isHaust = host.equals("haust.edu.cn") || host.endsWith(".haust.edu.cn");
+                    String root = isHaust ? ".haust.edu.cn" : ".chaoxing.com";
+                    String[] probePaths = isHaust ? haustPaths : chaoxingPaths;
+                    for (String path : probePaths) {
+                        String url = "https://" + host + path;
+                        String cookie = cm.getCookie(url);
+                        if (cookie == null || cookie.isEmpty()) continue;
+                        Set<String> expirePaths = new LinkedHashSet<>();
+                        expirePaths.add("/");
+                        expirePaths.add(path);
+                        if (path.length() > 1 && path.endsWith("/")) {
+                            expirePaths.add(path.substring(0, path.length() - 1));
+                        }
+                        for (String pair : cookie.split(";")) {
+                            int eq = pair.indexOf('=');
+                            if (eq <= 0) continue;
+                            String name = pair.substring(0, eq).trim();
+                            if (!name.matches("[A-Za-z0-9._-]+")) continue;
+                            for (String ep : expirePaths) {
+                                String expired = name + "=; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=" + ep;
+                                String[] candidates = {
+                                        expired,
+                                        expired + "; Secure",
+                                        expired + "; Domain=" + host,
+                                        expired + "; Domain=" + host + "; Secure",
+                                        expired + "; Domain=" + root,
+                                        expired + "; Domain=" + root + "; Secure"
+                                };
+                                for (String header : candidates) {
+                                    String dedupKey = url + "|" + header;
+                                    if (seenRemovals.add(dedupKey)) {
+                                        removals.add(new String[]{url, header});
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 if (removals.isEmpty()) {

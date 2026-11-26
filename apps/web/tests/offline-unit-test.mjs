@@ -1295,6 +1295,192 @@ async function runTests() {
   const nxParsed = parseCollegeListHtml(nxNavHtml, 'https://nx.haust.edu.cn/index/tzgg.htm', nxCollege)
   assert.deepEqual(nxParsed.items.map((x) => x.title), ['农学院2026年研究生评优公示'])
 
+  // 46. chaoxing.ts: 课堂活动 URL 净化，杜绝回退到 /v2/apis/ JSON 接口导致 WebView 乱码
+  const {
+    sanitizeChaoxingActivityUrl,
+    isChaoxingWorkExpired
+  } = await import('../src/android/lib/chaoxing.ts')
+  const actCourse = { courseId: '24001', clazzId: '88001' }
+  const expectedActPage = 'https://mobilelearn.chaoxing.com/widget/pcpick/stu/index?courseId=24001&jclassId=88001'
+  assert.equal(sanitizeChaoxingActivityUrl('', actCourse), expectedActPage)
+  assert.equal(
+    sanitizeChaoxingActivityUrl('https://mobilelearn.chaoxing.com/v2/apis/active/student/activelist?courseId=24001&classId=88001', actCourse),
+    expectedActPage
+  )
+  assert.equal(
+    sanitizeChaoxingActivityUrl('http://mobilelearn.chaoxing.com/newsign/preSign?activePrimaryId=123', actCourse),
+    'https://mobilelearn.chaoxing.com/newsign/preSign?activePrimaryId=123'
+  )
+
+  // 47. chaoxing.ts: 待办列表自动过滤已过期/无法提交的旧作业，保留正常未交与不限时作业
+  const sampleWorks = [
+    { title: '正常作业', course: '高数', courseId: '1', workId: 'w1', clazzId: 'c1', status: '未交', leftTime: '剩余2天3小时', uncommitted: true, url: 'https://mooc1-api.chaoxing.com/work/1' },
+    { title: '不限时作业', course: '高数', courseId: '1', workId: 'w2', clazzId: 'c1', status: '未交', leftTime: '', uncommitted: true, url: 'https://mooc1-api.chaoxing.com/work/2' },
+    { title: '已过期旧作业', course: '高数', courseId: '1', workId: 'w3', clazzId: 'c1', status: '未交', leftTime: '已过期', uncommitted: true, url: 'https://mooc1-api.chaoxing.com/work/3' },
+    { title: '已截止作业', course: '高数', courseId: '1', workId: 'w4', clazzId: 'c1', status: '已截止', leftTime: '', uncommitted: true, url: 'https://mooc1-api.chaoxing.com/work/4' },
+    { title: '剩余0分钟', course: '高数', courseId: '1', workId: 'w5', clazzId: 'c1', status: '未交', leftTime: '剩余0分钟', uncommitted: true, url: 'https://mooc1-api.chaoxing.com/work/5' },
+    { title: '已提交作业', course: '高数', courseId: '1', workId: 'w6', clazzId: 'c1', status: '已完成', leftTime: '', uncommitted: false, url: 'https://mooc1-api.chaoxing.com/work/6' }
+  ]
+  assert.equal(isChaoxingWorkExpired(sampleWorks[0]), false)
+  assert.equal(isChaoxingWorkExpired(sampleWorks[1]), false)
+  assert.equal(isChaoxingWorkExpired(sampleWorks[2]), true)
+  assert.equal(isChaoxingWorkExpired(sampleWorks[3]), true)
+  assert.equal(isChaoxingWorkExpired(sampleWorks[4]), true)
+  assert.equal(isChaoxingWorkExpired(sampleWorks[5]), false)
+  assert.deepEqual(
+    buildChaoxingTodos(sampleWorks, []).map((t) => t.title),
+    ['正常作业', '不限时作业']
+  )
+
+  // 48. dorm-electricity.ts: 统一支付平台 (cwpay) 园区选项解析、电量解析与 401 自动续登重试
+  const {
+    parseDormOptions,
+    parseDormRechargeInfo,
+    createDormElectricityService
+  } = await import('../src/android/lib/dorm-electricity.ts')
+  const areaParsed = parseDormOptions({
+    IsSuccess: true,
+    Content: [
+      { label: '请选择', value: '-1' },
+      { label: '乾园宿舍', value: '101' },
+      { label: '嘉园宿舍', value: '103' }
+    ]
+  })
+  assert.equal(areaParsed.ok, true)
+  assert.deepEqual(areaParsed.options, [
+    { id: '101', name: '乾园宿舍' },
+    { id: '103', name: '嘉园宿舍' }
+  ])
+  const sampleDormRoom = {
+    areaId: '101', areaName: '乾园宿舍', buildId: '6', buildName: '乾园6#楼', roomId: '6105', roomName: '6105房间'
+  }
+  const infoParsed = parseDormRechargeInfo({
+    d: {
+      RetCode: 'T',
+      Content: {
+        Succ: true,
+        CzThirdInfo: { Czxm: '乾园宿舍/乾园6#楼/6105房间', State: '4616.07', DepName: '27.53' }
+      }
+    }
+  }, sampleDormRoom)
+  assert.equal(infoParsed.ok, true)
+  assert.equal(infoParsed.remainingKwh, 27.53)
+  assert.equal(infoParsed.usedKwh, 4616.07)
+
+  const dormMem = new Map()
+  const dormStorage = {
+    getItem: (k) => dormMem.get(k) ?? null,
+    setItem: (k, v) => dormMem.set(k, v),
+    removeItem: (k) => dormMem.delete(k)
+  }
+  let dormAuthed = false
+  let dormEnsureCalls = 0
+  const dormSvc = createDormElectricityService(dormStorage, {
+    async post(url, body, headers) {
+      if (!dormAuthed) return { status: 401, url, data: '' }
+      if (url.endsWith('/Token/Csrf')) return { status: 200, url, data: '"csrf-ok"' }
+      assert.equal(headers['x-csrfToken'], 'csrf-ok')
+      if (url.endsWith('/GetRechargeInfo')) {
+        return {
+          status: 200,
+          url,
+          data: { d: { RetCode: 'T', Content: { Succ: true, CzThirdInfo: { Czxm: '乾园宿舍/乾园6#楼/6105房间', State: '100.5', DepName: '45.2' } } } }
+        }
+      }
+      return { status: 200, url, data: { IsSuccess: true, Content: [{ label: '乾园宿舍', value: '101' }] } }
+    },
+    async ensureSession() {
+      dormEnsureCalls += 1
+      dormAuthed = true
+      return true
+    }
+  })
+  assert.equal(await dormSvc.saveRoom(sampleDormRoom), true)
+  const dormQuery = await dormSvc.query()
+  assert.equal(dormEnsureCalls, 1)
+  assert.equal(dormQuery.status, 'ok')
+  assert.equal(dormQuery.reading.remainingKwh, 45.2)
+  assert.equal(dormQuery.reading.usedKwh, 100.5)
+
+  // 49. adapters.ts: 9-12 节晚课完整解析与作息时间映射
+  const { sessionsForWeek, periodTime } = await import('../src/adapters.ts')
+  const nightTable = {
+    fetchedAt: '2026-11-26T00:00:00Z',
+    term: '2026-2027学年1学期',
+    courses: [{
+      no: '99', code: 'NIGHT01', name: '大学英语晚课', teacher: '王老师',
+      credits: '2', hours: '32', weeks: '1-16', attendees: '60', category: '通识', examType: '考查',
+      slots: [{ weeks: '1-16', weekday: 3, periods: [9, 10, 11, 12], room: '公教1-101' }]
+    }],
+    labs: [],
+    practice: []
+  }
+  const nightSessions = sessionsForWeek(nightTable, 5)
+  assert.equal(nightSessions.length, 1)
+  assert.equal(nightSessions[0].start, 9)
+  assert.equal(nightSessions[0].end, 12)
+  assert.deepEqual(periodTime(12, new Date('2026-11-26T12:00:00+08:00')), ['20:40', '21:25'])
+
+  // 50. eams.ts: 带空格的节次区间（"9 - 12" / "9 至 12"）应连续展开不丢中间节次
+  const { readFileSync } = await import('node:fs')
+  const eamsSrc = readFileSync(new URL('../src/android/lib/eams.ts', import.meta.url), 'utf8')
+  const parsePeriodsMatch = eamsSrc.match(/const parsePeriods = \(s\) =>[\s\S]*?\.flatMap\([\s\S]*?\}\);/)
+  assert.ok(parsePeriodsMatch, 'parsePeriods definition must exist in eams.ts')
+  const parsePeriodsFn = new Function(`${parsePeriodsMatch[0]}\nreturn parsePeriods;`)()
+  assert.deepEqual(parsePeriodsFn('9 - 12'), [9, 10, 11, 12])
+  assert.deepEqual(parsePeriodsFn('9 至 12节'), [9, 10, 11, 12])
+  assert.deepEqual(parsePeriodsFn('10-12节'), [10, 11, 12])
+  assert.deepEqual(parsePeriodsFn('1, 2, 9 - 11'), [1, 2, 9, 10, 11])
+
+  // 51. chaoxing.ts: 回归验证「截止提交」不误判过期、非默认端口与无尾斜杠 /api 被清洗
+  assert.equal(isChaoxingWorkExpired({ status: '未交', leftTime: '12月1日截止提交', uncommitted: true }), false)
+  assert.equal(isChaoxingWorkExpired({ status: '待提交', leftTime: '0', uncommitted: true }), false)
+  assert.equal(isChaoxingWorkExpired({ status: '待提交', leftTime: '剩余0分钟', uncommitted: true }), true)
+  const fallbackAct = sanitizeChaoxingActivityUrl('https://mobilelearn.chaoxing.com:8443/widget/pcpick/stu/index?courseId=1', { courseId: '1', clazzId: '2' })
+  assert.equal(fallbackAct, 'https://mobilelearn.chaoxing.com/widget/pcpick/stu/index?courseId=1&jclassId=2')
+  const fallbackNoSlashApi = sanitizeChaoxingActivityUrl('https://mobilelearn.chaoxing.com/v2/api', { courseId: '1', clazzId: '2' })
+  assert.equal(fallbackNoSlashApi, 'https://mobilelearn.chaoxing.com/widget/pcpick/stu/index?courseId=1&jclassId=2')
+
+  // 52. dorm-electricity.ts: CSRF 504/超时不误报 auth_required、resetSession 清令牌与 runTransaction 串行包裹
+  let csrfFetchCount = 0
+  let txCount = 0
+  let forceTimeout = true
+  const dormSvc2 = createDormElectricityService(dormStorage, {
+    async runTransaction(fn) {
+      txCount += 1
+      return fn()
+    },
+    async post(url, _body, headers) {
+      if (url.endsWith('/Token/Csrf')) {
+        csrfFetchCount += 1
+        if (forceTimeout) return { status: 504, url, data: '', error: 'timeout' }
+        return { status: 200, url, data: `"csrf-${csrfFetchCount}"` }
+      }
+      assert.equal(headers['x-csrfToken'], `csrf-${csrfFetchCount}`)
+      return {
+        status: 200,
+        url,
+        data: { d: { RetCode: 'T', Content: { Succ: true, CzThirdInfo: { Czxm: '乾园宿舍/乾园6#楼/6105房间', State: '10', DepName: '20' } } } }
+      }
+    },
+    async ensureSession() {
+      return false
+    }
+  })
+  const timeoutRes = await dormSvc2.query()
+  assert.equal(timeoutRes.status, 'query_failed')
+  forceTimeout = false
+  const okRes1 = await dormSvc2.query()
+  assert.equal(okRes1.status, 'ok')
+  const okRes2 = await dormSvc2.query()
+  assert.equal(okRes2.status, 'ok')
+  assert.equal(csrfFetchCount, 2) // 1st was timeout, 2nd succeeded and cached
+  dormSvc2.resetSession?.()
+  const okRes3 = await dormSvc2.query()
+  assert.equal(okRes3.status, 'ok')
+  assert.equal(csrfFetchCount, 3) // resetSession forced fresh CSRF fetch
+  assert.equal(txCount, 4)
+
   console.log('ALL OFFLINE UNIT TESTS PASSED')
 }
 

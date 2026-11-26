@@ -4,9 +4,10 @@
  */
 import type { CardInfo, ChaoxingDashboard, ChargerData, CourseTable, Exam, NoticeItem, SessionStatus } from './types'
 import type { AirconElectricityResult, AirconRoom } from './types/aircon-electricity'
+import type { DormElectricityResult, DormRoom } from './types/dorm-electricity'
 
 export type AppTab = 'home' | 'dashboard' | 'notices' | 'profile'
-export type CardKey = 'focus' | 'exam' | 'notices' | 'aircon' | 'chargers' | 'card'
+export type CardKey = 'focus' | 'exam' | 'notices' | 'aircon' | 'dorm' | 'chargers' | 'card'
 
 export const ONBOARDING_VERSION_KEY = 'haust:onboarding_v2'
 export const DEMO_MODE_KEY = 'haust:demo_mode'
@@ -24,6 +25,7 @@ export type SyncTimes = {
   card: number
   chargers: number
   aircon: number
+  dorm?: number
 }
 
 export type HomeSnapshot = {
@@ -35,6 +37,8 @@ export type HomeSnapshot = {
   card: CardInfo | null
   airconRoom: AirconRoom | null
   airconResult: AirconElectricityResult | null
+  dormRoom?: DormRoom | null
+  dormResult?: DormElectricityResult | null
   lastSync: string
   syncTimes: SyncTimes
 }
@@ -94,13 +98,16 @@ export function readHomeSnapshot(): HomeSnapshot | null {
     card: snap.card ?? null,
     airconRoom: snap.airconRoom ?? null,
     airconResult: snap.airconResult ?? null,
+    dormRoom: snap.dormRoom ?? null,
+    dormResult: snap.dormResult ?? null,
     lastSync: typeof snap.lastSync === 'string' ? snap.lastSync : '',
     syncTimes: {
       academic: Number(snap.syncTimes?.academic) || 0,
       notices: Number(snap.syncTimes?.notices) || 0,
       card: Number(snap.syncTimes?.card) || 0,
       chargers: Number(snap.syncTimes?.chargers) || 0,
-      aircon: Number(snap.syncTimes?.aircon) || 0
+      aircon: Number(snap.syncTimes?.aircon) || 0,
+      dorm: Number(snap.syncTimes?.dorm) || 0
     }
   }
 }
@@ -231,6 +238,15 @@ export function fingerprintAircon(room: AirconRoom | null, result: AirconElectri
     return `ok:${room.roomVerify}:${r.remainingKwh ?? ''}:${r.balanceYuan ?? ''}`
   }
   return `${result?.status || 'pending'}:${room.roomVerify}`
+}
+
+export function fingerprintDorm(room: DormRoom | null, result: DormElectricityResult | null): string {
+  if (!room) return 'unbound'
+  if (result?.status === 'ok') {
+    const r = result.reading
+    return `ok:${room.areaId}:${room.buildId}:${room.roomId}:${r.remainingKwh}:${r.usedKwh ?? ''}`
+  }
+  return `${result?.status || 'pending'}:${room.areaId}:${room.buildId}:${room.roomId}`
 }
 
 export function fingerprintChargers(chargers: ChargerData | null): string {

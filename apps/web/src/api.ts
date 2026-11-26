@@ -24,6 +24,7 @@ import type {
 import { removeRetiredWebData } from './android/retired-study-data'
 import { createAirconElectricityService } from './android/lib/aircon-electricity'
 import type { AirconRoomListQuery, AirconRoomListResult } from './types/aircon-electricity'
+import type { DormElectricityResult, DormRoom, DormRoomListQuery, DormRoomListResult } from './types/dorm-electricity'
 
 try { removeRetiredWebData() } catch { /* Storage can be disabled in a browser preview. */ }
 
@@ -34,6 +35,8 @@ const haust = (): Partial<Haust> | undefined => (typeof window !== 'undefined' ?
 export const isConnected = () => !!haust()
 export const supportsChaoxing = () => !!haust()?.chaoxingDashboard
 export const supportsNativeAuth = () => !!haust()?.nativeAuth
+export const supportsDormElectricity = () => !!haust()?.dormElectricity
+export const supportsSaveImageToGallery = () => !!haust()?.saveImageToGallery
 
 /**
  * 是不是跑在原生外壳（Capacitor）里。
@@ -80,6 +83,13 @@ export const data = {
     return guard(() => electricityService()?.listRooms(query) ?? Promise.resolve(fallback), fallback)
   },
   airconElectricity: () => guard<AirconElectricityResult | null>(() => electricityService()?.query() ?? Promise.resolve(null), null),
+  dormRoom: () => guard<DormRoom | null>(() => haust()?.dormElectricity?.getRoom() ?? Promise.resolve(null), null),
+  saveDormRoom: (room: DormRoom | null) => guard(() => haust()?.dormElectricity?.saveRoom(room) ?? Promise.resolve(false), false),
+  listDormRooms: (query: DormRoomListQuery) => {
+    const fallback: DormRoomListResult = { status: 'error', message: '未连接宿舍电费服务' }
+    return guard(() => haust()?.dormElectricity?.listRooms(query) ?? Promise.resolve(fallback), fallback)
+  },
+  dormElectricity: () => guard<DormElectricityResult | null>(() => haust()?.dormElectricity?.query() ?? Promise.resolve(null), null),
   status: () => guard<SessionStatus | null>(haust()?.status, null),
   login: (schoolLogin?: SchoolLogin) => guard<SessionStatus | null>(() => haust()?.login?.(schoolLogin) ?? Promise.resolve(null), null),
   courses: () => guard<CourseTable | null>(haust()?.refreshCourses, null),
@@ -98,6 +108,7 @@ export const data = {
   clearDone: async () => false,
   clearCache: () => guard<boolean>(haust()?.clearCache, false),
   clearCred: () => guard<boolean>(haust()?.clearCred, false),
+  clearChaoxing: () => guard<boolean>(haust()?.clearChaoxing, false),
 
   chaoxingLogin: () => guard(haust()?.chaoxingLogin, { loggedIn: false }),
   chaoxingDashboard: () => guard<ChaoxingDashboard | null>(haust()?.chaoxingDashboard, null),

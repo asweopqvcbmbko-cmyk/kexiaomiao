@@ -1,5 +1,6 @@
 package cn.edu.haust.campusassistant;
 
+import android.os.Build;
 import android.os.Bundle;
 import android.view.View;
 import android.webkit.CookieManager;
@@ -7,6 +8,8 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 
 import androidx.activity.OnBackPressedCallback;
+import androidx.webkit.WebSettingsCompat;
+import androidx.webkit.WebViewFeature;
 
 import com.getcapacitor.BridgeActivity;
 
@@ -19,14 +22,34 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(AppUpdaterPlugin.class);
         super.onCreate(savedInstanceState);
 
+        // 禁用系统级 Force Dark（鸿蒙卓易通/部分 ROM 会将深色卡片阴影反色为刺眼白光晕）
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                getWindow().getDecorView().setForceDarkAllowed(false);
+            } catch (Exception ignored) {
+            }
+        }
+
         // 禁用 Android 12+ 系统级 WebView 边缘果冻拉伸与全局双指缩放，保持原生 App 1:1 手感
         if (bridge != null && bridge.getWebView() != null) {
             WebView webView = bridge.getWebView();
             webView.setOverScrollMode(View.OVER_SCROLL_NEVER);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                try {
+                    webView.setForceDarkAllowed(false);
+                } catch (Exception ignored) {
+                }
+            }
             WebSettings settings = webView.getSettings();
             settings.setSupportZoom(false);
             settings.setBuiltInZoomControls(false);
             settings.setDisplayZoomControls(false);
+            if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
+                WebSettingsCompat.setAlgorithmicDarkeningAllowed(settings, false);
+            }
+            if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK)) {
+                WebSettingsCompat.setForceDark(settings, WebSettingsCompat.FORCE_DARK_OFF);
+            }
         }
 
         // 迁移至 OnBackPressedDispatcher，兼容 Android 16 (targetSdk 36) 预测性返回手势

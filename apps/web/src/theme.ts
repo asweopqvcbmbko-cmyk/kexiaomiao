@@ -23,7 +23,7 @@ export function applyTheme(theme: Theme) {
     localStorage.setItem(KEY, theme)
   } catch (_) {}
   // 让 Electron 的标题栏 / 安卓状态栏跟上
-  const bg = actual === 'dark' ? '#0E1218' : '#F3F5F9'
+  const bg = actual === 'dark' ? '#000000' : '#F2F4F8'
   const meta = document.querySelector('meta[name="theme-color"]')
   if (meta) meta.setAttribute('content', bg)
   // 安卓：状态栏底色跟 App 背景一致，图标黑白跟着主题（沉浸感的来源）

@@ -13,6 +13,7 @@ declare global {
       }
       airconElectricity?: import('./types').AirconElectricityService
       airconRequest?: (url: string) => Promise<{ status: number; data: unknown }>
+      dormElectricity?: import('./types/dorm-electricity').DormElectricityService
       status: () => Promise<import('./types').SessionStatus>
       login: (schoolLogin?: import('./types').SchoolLogin) => Promise<import('./types').SessionStatus>
       refreshCourses: () => Promise<import('./types').CourseTable>
@@ -39,6 +40,7 @@ declare global {
       /** 安卓状态栏配色（跟主题走）；桌面版没有这个方法，调用方要可选链 */
       statusBar?: (o: { color: string; dark: boolean }) => Promise<boolean>
       clearCred: () => Promise<boolean>
+      clearChaoxing?: () => Promise<boolean>
       clearCache: () => Promise<boolean>
       onSession: (cb: (st: import('./types').SessionStatus) => void) => () => void
     }

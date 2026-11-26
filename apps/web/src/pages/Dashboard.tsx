@@ -5,7 +5,13 @@ import { Empty, Modal, PageHeader } from '../components/ui'
 import { data } from '../api'
 import { buildDemoChaoxingCourses } from '../demoData'
 import { haptic } from '../haptics'
-import { buildChaoxingTodos, filterByIgnoredCourses, parseLeftTimeMinutes } from '../android/lib/chaoxing'
+import {
+  buildChaoxingTodos,
+  filterByIgnoredCourses,
+  isChaoxingWorkExpired,
+  parseLeftTimeMinutes,
+  sanitizeChaoxingActivityUrl
+} from '../android/lib/chaoxing'
 import type { ChaoxingActivitiesResult, ChaoxingCourseProgress, ChaoxingDashboard, ChaoxingProgressResult, ChaoxingSettings, ChaoxingTodo } from '../types'
 import './dashboard-swipe.css'
 
@@ -293,6 +299,7 @@ export function Dashboard(props: {
   courseData: ReturnType<typeof useChaoxingCourseData>
   onRefresh: () => void
   onLogin: () => void
+  onLogout?: () => void
   onOpenItem: (url: string, title: string) => void
   onLaunchApp: () => void
 }) {
@@ -338,7 +345,12 @@ export function Dashboard(props: {
     const timestamp = /^\d{10,13}$/.test(end) ? Number(end) * (end.length === 10 ? 1000 : 1) : Date.parse(end)
     const minutes = Number.isFinite(timestamp) ? Math.max(0, Math.ceil((timestamp - Date.now()) / 60000)) : null
     const todo: ChaoxingTodo = {
-      ...item, kind: 'activity', course: item.courseName, minutes, urgent: minutes != null && minutes <= 1440
+      ...item,
+      url: sanitizeChaoxingActivityUrl(item.url, item),
+      kind: 'activity',
+      course: item.courseName,
+      minutes,
+      urgent: minutes != null && minutes <= 1440
     }
     todos.push(todo)
   }
@@ -421,7 +433,8 @@ export function Dashboard(props: {
   const courseError = courseResult?.error
   const showingCache = !!(courseResult?.loggedIn || courseResult?.stale)
 
-  const pendingWorks = works.filter((w) => w.uncommitted)
+  const pendingWorks = works.filter((w) => w.uncommitted && !isChaoxingWorkExpired(w))
+  const expiredWorks = works.filter((w) => w.uncommitted && isChaoxingWorkExpired(w))
   const doneWorks = works.filter((w) => !w.uncommitted)
   const activeExams = exams.filter((e) => !e.finished && !e.expired)
   const doneExams = exams.filter((e) => e.finished || e.expired)
@@ -544,6 +557,21 @@ export function Dashboard(props: {
                 </div>
               )
             })}
+            {props.supported && !props.demoMode && props.onLogout && (loggedIn || hasCachedData) ? (
+              <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--line)' }}>
+                <button
+                  type="button"
+                  className="softbtn"
+                  style={{ width: '100%', color: 'var(--danger)' }}
+                  onClick={() => {
+                    setSettingsOpen(false)
+                    props.onLogout?.()
+                  }}
+                >
+                  退出学习通账号（不影响教务与电费）
+                </button>
+              </div>
+            ) : null}
           </div>
         </Modal>
       )}
@@ -747,7 +775,7 @@ export function Dashboard(props: {
                             type="button"
                             className="dash-row kind-activity urgent"
                             key={`${item.courseId}:${item.clazzId}:${item.activeId}`}
-                            onClick={() => props.onOpenItem(item.url, item.title)}
+                            onClick={() => props.onOpenItem(sanitizeChaoxingActivityUrl(item.url, item), item.title)}
                           >
                             <span className="dash-row-copy">
                               <b>{item.title}</b>
@@ -782,7 +810,7 @@ export function Dashboard(props: {
                               type="button"
                               className="dash-row kind-done"
                               key={`${item.courseId}:${item.clazzId}:${item.activeId}`}
-                              onClick={() => props.onOpenItem(item.url, item.title)}
+                              onClick={() => props.onOpenItem(sanitizeChaoxingActivityUrl(item.url, item), item.title)}
                             >
                               <span className="dash-row-copy">
                                 <b>{item.title}</b>
@@ -906,7 +934,40 @@ export function Dashboard(props: {
                     </div>
                   </div>
                 ) : (
-                  <div className="card dash-note">暂无待提交作业，已完成项已折叠在下方。</div>
+                  <div className="card dash-note">暂无待提交作业，历史作业已折叠在下方。</div>
+                )}
+
+                {expiredWorks.length > 0 && (
+                  <div className="dash-fold-wrap">
+                    <button
+                      type="button"
+                      className="dash-fold-btn"
+                      onClick={() => toggleFold('expiredWorks')}
+                      aria-expanded={!!foldOpen.expiredWorks}
+                    >
+                      <span>已过期 / 无法提交作业 ({expiredWorks.length})</span>
+                      <span>{foldOpen.expiredWorks ? '收起' : '展开 ›'}</span>
+                    </button>
+                    {foldOpen.expiredWorks && (
+                      <div className="card dash-list muted-list">
+                        {expiredWorks.map((w) => (
+                          <button
+                            key={w.workId || `${w.courseId}-${w.title}`}
+                            type="button"
+                            className="dash-row kind-done"
+                            onClick={() => props.onOpenItem(w.url, w.title)}
+                          >
+                            <span className="dash-row-copy">
+                              <b>{w.title}</b>
+                              <small>{courseName(w) || '学习通课程'}</small>
+                            </span>
+                            <span className="dash-cd done">{w.status || '已过期'}</span>
+                            <Icon name="arrow" className="arrow" />
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 )}
 
                 {doneWorks.length > 0 && (

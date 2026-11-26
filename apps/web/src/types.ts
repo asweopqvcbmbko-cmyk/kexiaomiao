@@ -11,6 +11,7 @@ export type ChaoxingWork = ChaoxingItem & {
   clazzId: string
   leftTime: string
   uncommitted: boolean
+  expired?: boolean
 }
 
 export type ChaoxingExam = ChaoxingItem & {
@@ -24,7 +25,7 @@ export type ChaoxingExam = ChaoxingItem & {
 export type ChaoxingTodo = (
   | (ChaoxingWork & { kind: 'work' })
   | (ChaoxingExam & { kind: 'exam' })
-  | (ChaoxingItem & { kind: 'activity'; activeId: string })
+  | (ChaoxingItem & { kind: 'activity'; activeId: string; clazzId: string })
 ) & {
   minutes: number | null
   urgent: boolean

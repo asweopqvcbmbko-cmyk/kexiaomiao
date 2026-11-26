@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState, type TouchEvent } from 'react'
 import { Icon } from '../icons'
 import { PageHeader } from '../components/ui'
 import { periodTime, noticeDate, type Sess, type cardView, type chargerView } from '../adapters'
+import { haptic } from '../haptics'
 import type { Exam, NoticeItem } from '../types'
 import type { AirconElectricityResult, AirconRoom } from '../types/aircon-electricity'
+import type { DormElectricityResult, DormRoom } from '../types/dorm-electricity'
 import type { CardKey } from '../snapshot'
 
 type HomeProps = {
@@ -16,6 +18,8 @@ type HomeProps = {
   card: ReturnType<typeof cardView>
   room: AirconRoom | null
   electricity: AirconElectricityResult | null
+  dormRoom?: DormRoom | null
+  dormElectricity?: DormElectricityResult | null
   noticeUnread: number
   unreadNotices: NoticeItem[]
   noticeTitles: string[]
@@ -36,6 +40,7 @@ type HomeProps = {
   onOpenChargers: () => void
   onOpenCard: () => void
   onBindRoom: () => void
+  onBindDormRoom?: () => void
   onOpenSchedule: () => void
   onExam: () => void
   onLogin: () => void
@@ -46,6 +51,17 @@ type Phase = 'upcoming' | 'current' | 'ended'
 
 /** 电量低于这个值时整张卡片换成警示色 */
 const LOW_KWH = 30
+const POWER_TAB_KEY = 'haust.ui.powerTab.v1'
+type PowerTab = 'aircon' | 'dorm'
+
+function readSavedPowerTab(): PowerTab | null {
+  try {
+    const v = localStorage.getItem(POWER_TAB_KEY)
+    return v === 'aircon' || v === 'dorm' ? v : null
+  } catch {
+    return null
+  }
+}
 
 const minutes = (time: string) => Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5))
 function syncTime(value?: string | null) {
@@ -73,8 +89,28 @@ function SwrFx({ loading, ripple }: { loading?: boolean; ripple?: number }) {
 }
 
 export function Home(props: HomeProps) {
-  const { exam, chargers, card, room, electricity } = props
+  const { exam, chargers, card, room, electricity, dormRoom, dormElectricity } = props
   const [now, setNow] = useState(() => new Date())
+  const [powerTab, setPowerTab] = useState<PowerTab>(() => {
+    const saved = readSavedPowerTab()
+    if (saved) return saved
+    return !room && dormRoom ? 'dorm' : 'aircon'
+  })
+  const powerTouch = useRef<{ x: number; y: number } | null>(null)
+  const hasDormSupport = Boolean(props.onBindDormRoom)
+
+  useEffect(() => {
+    if (!hasDormSupport || readSavedPowerTab()) return
+    if (!room && dormRoom) setPowerTab('dorm')
+  }, [hasDormSupport, room, dormRoom])
+
+  const selectPowerTab = (next: PowerTab) => {
+    if (next === powerTab) return
+    haptic('light')
+    setPowerTab(next)
+    try { localStorage.setItem(POWER_TAB_KEY, next) } catch { /* ignore */ }
+  }
+
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 30_000)
     return () => window.clearInterval(timer)
@@ -111,6 +147,22 @@ export function Home(props: HomeProps) {
           : reading
             ? readingTime ? `更新于 ${readingTime}` : '已查询'
             : room
+              ? '正在查询…'
+              : ''
+
+  const dormReading = dormElectricity?.status === 'ok' ? dormElectricity.reading : null
+  const dormLow = dormReading != null && dormReading.remainingKwh <= LOW_KWH
+  const dormReadingTime = dormReading ? syncTime(dormReading.fetchedAt) : ''
+  const dormNote =
+    dormElectricity && 'message' in dormElectricity && dormElectricity.message
+      ? dormElectricity.message
+      : dormElectricity?.status === 'query_failed'
+        ? '查询失败，刷新后重试'
+        : dormElectricity?.status === 'no_data'
+          ? '学校没有返回读数'
+          : dormReading
+            ? dormReadingTime ? `更新于 ${dormReadingTime}` : '已查询'
+            : dormRoom
               ? '正在查询…'
               : ''
 
@@ -358,43 +410,160 @@ export function Home(props: HomeProps) {
 
       {/* 校园服务 */}
       <section className="block" aria-label="校园服务">
-        {/* 空调电量：卡片本体不变，移入校园服务最上方 */}
-        <button
-          className={`power${low ? ' low' : ''}${room ? '' : ' empty'}${swrClass('aircon')}`}
-          onClick={props.onBindRoom}
-          aria-label={room ? `空调剩余电量，${room.roomName}，点击更换宿舍` : '绑定宿舍查看空调电量'}
-        >
-          <SwrFx loading={props.swrCards?.aircon} ripple={props.ripples?.aircon} />
-          <span className="power-head">
-            <span className="power-title">
-              <Icon name="air" />
-              空调电量
-            </span>
-            <span className="power-room">{room ? `${room.buildName ? room.buildName + ' ' : ''}${room.roomName}` : '未绑定宿舍'}</span>
-          </span>
-          {!room ? (
-            <span className="power-cta">
-              绑定宿舍，随时查看剩余电量 <Icon name="arrow" />
-            </span>
-          ) : reading ? (
-            <>
-              <span className="power-main">
-                <strong>{fmtNum(reading.remainingKwh)}</strong>
-                <em>{reading.quantityUnit || '度'}</em>
-                {low ? <span className="power-flag">电量偏低</span> : null}
-              </span>
-              <span className="power-foot">
-                {reading.balanceYuan != null ? <span>余额 ¥{fmtNum(reading.balanceYuan)}</span> : null}
-                {electricNote ? <span>{electricNote}</span> : null}
-              </span>
-            </>
-          ) : (
-            <span className="power-state">
-              <b>{electricNote || '暂无读数'}</b>
-              <small>刷新重试，或点此检查宿舍绑定</small>
-            </span>
-          )}
-        </button>
+        {/* 电费堆叠卡：空调电量 & 宿舍电费合二为一，支持顶部胶囊切换与左右滑动翻页 */}
+        {(() => {
+          const activeTab: PowerTab = hasDormSupport ? powerTab : 'aircon'
+          const isDorm = activeTab === 'dorm'
+          const activeLow = isDorm ? dormLow : low
+          const activeBound = isDorm ? Boolean(dormRoom) : Boolean(room)
+          const activeCardKey: CardKey = isDorm ? 'dorm' : 'aircon'
+          const onCardTap = () => {
+            if (isDorm && props.onBindDormRoom) props.onBindDormRoom()
+            else props.onBindRoom()
+          }
+          const onPowerTouchStart = (e: TouchEvent<HTMLDivElement>) => {
+            if (!hasDormSupport || e.touches.length !== 1) {
+              powerTouch.current = null
+              return
+            }
+            powerTouch.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }
+          }
+          const onPowerTouchEnd = (e: TouchEvent<HTMLDivElement>) => {
+            const start = powerTouch.current
+            powerTouch.current = null
+            if (!hasDormSupport || !start || !e.changedTouches.length) return
+            const dx = e.changedTouches[0].clientX - start.x
+            const dy = e.changedTouches[0].clientY - start.y
+            if (Math.abs(dx) < 44 || Math.abs(dx) < Math.abs(dy) * 1.3) return
+            selectPowerTab(dx < 0 ? (isDorm ? 'aircon' : 'dorm') : (isDorm ? 'aircon' : 'dorm'))
+          }
+          return (
+            <div className={`power-stack${hasDormSupport ? ' is-stacked' : ''}`}>
+              <div
+                className={`power${activeLow ? ' low' : ''}${activeBound ? '' : ' empty'}${swrClass(activeCardKey)}`}
+                onTouchStart={onPowerTouchStart}
+                onTouchEnd={onPowerTouchEnd}
+                onTouchCancel={() => { powerTouch.current = null }}
+              >
+                <SwrFx loading={props.swrCards?.[activeCardKey]} ripple={props.ripples?.[activeCardKey]} />
+                <div className="power-head">
+                  {hasDormSupport ? (
+                    <div
+                      className="power-seg"
+                      role="tablist"
+                      aria-label="切换电费类型"
+                    >
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={!isDorm}
+                        className={!isDorm ? 'active' : ''}
+                        onClick={() => selectPowerTab('aircon')}
+                      >
+                        <Icon name="air" />
+                        空调
+                        {isDorm && low ? <i className="power-seg-dot" aria-label="空调电量偏低" /> : null}
+                      </button>
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={isDorm}
+                        className={isDorm ? 'active' : ''}
+                        onClick={() => selectPowerTab('dorm')}
+                      >
+                        <Icon name="bolt" />
+                        宿舍
+                        {!isDorm && dormLow ? <i className="power-seg-dot" aria-label="宿舍电量偏低" /> : null}
+                      </button>
+                    </div>
+                  ) : (
+                    <span className="power-title">
+                      <Icon name="air" />
+                      空调电量
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    className="power-room power-room-btn"
+                    onClick={onCardTap}
+                  >
+                    {isDorm
+                      ? (dormRoom ? (dormRoom.displayName || `${dormRoom.areaName} ${dormRoom.buildName} ${dormRoom.roomName}`) : '未绑定宿舍')
+                      : (room ? `${room.buildName ? room.buildName + ' ' : ''}${room.roomName}` : '未绑定宿舍')}
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  className="power-body-btn"
+                  onClick={onCardTap}
+                  aria-label={
+                    isDorm
+                      ? (dormRoom ? `宿舍照明电费，${dormRoom.displayName || dormRoom.roomName}，点击更换宿舍` : '绑定宿舍查看照明电费')
+                      : (room ? `空调剩余电量，${room.roomName}，点击更换宿舍` : '绑定宿舍查看空调电量')
+                  }
+                >
+                {isDorm ? (
+                  !dormRoom ? (
+                    <span className="power-cta">
+                      绑定宿舍（乾园/西苑/嘉园/菁园），查看照明电量 <Icon name="arrow" />
+                    </span>
+                  ) : dormReading ? (
+                    <>
+                      <span className="power-main">
+                        <strong>{fmtNum(dormReading.remainingKwh)}</strong>
+                        <em>{dormReading.quantityUnit || '度'}</em>
+                        {dormLow ? <span className="power-flag">电量偏低</span> : null}
+                      </span>
+                      <span className="power-foot">
+                        {dormReading.usedKwh != null ? <span>累计已用 {fmtNum(dormReading.usedKwh)} 度</span> : null}
+                        {dormNote ? <span>{dormNote}</span> : null}
+                        {hasDormSupport ? (
+                          <span className="power-dots" aria-hidden="true">
+                            <i className={!isDorm ? 'active' : ''} />
+                            <i className={isDorm ? 'active' : ''} />
+                          </span>
+                        ) : null}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="power-state">
+                      <b>{dormNote || '暂无读数'}</b>
+                      <small>刷新重试，或点此检查宿舍绑定</small>
+                    </span>
+                  )
+                ) : !room ? (
+                  <span className="power-cta">
+                    绑定宿舍，随时查看剩余空调电量 <Icon name="arrow" />
+                  </span>
+                ) : reading ? (
+                  <>
+                    <span className="power-main">
+                      <strong>{fmtNum(reading.remainingKwh)}</strong>
+                      <em>{reading.quantityUnit || '度'}</em>
+                      {low ? <span className="power-flag">电量偏低</span> : null}
+                    </span>
+                    <span className="power-foot">
+                      {reading.balanceYuan != null ? <span>余额 ¥{fmtNum(reading.balanceYuan)}</span> : null}
+                      {electricNote ? <span>{electricNote}</span> : null}
+                      {hasDormSupport ? (
+                        <span className="power-dots" aria-hidden="true">
+                          <i className={!isDorm ? 'active' : ''} />
+                          <i className={isDorm ? 'active' : ''} />
+                        </span>
+                      ) : null}
+                    </span>
+                  </>
+                ) : (
+                  <span className="power-state">
+                    <b>{electricNote || '暂无读数'}</b>
+                    <small>刷新重试，或点此检查宿舍绑定</small>
+                  </span>
+                )}
+                </button>
+              </div>
+            </div>
+          )
+        })()}
 
         <div className="tiles">
           <button className={`tile${swrClass('chargers')}`} onClick={props.onOpenChargers}>

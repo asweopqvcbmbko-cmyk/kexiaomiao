@@ -99,7 +99,7 @@ export function Schedule(props: {
   const activeTop = activePeriod
     ? (minutesNow - activePeriod.from) / (activePeriod.to - activePeriod.from) * 100
     : 0
-  const rowCount = Math.min(12, Math.max(8, activePeriod?.number ?? 0, ...sessions.map((session) => session.end)))
+  const rowCount = 12
   const shownPeriods = periods.slice(0, rowCount)
 
   const timeline = daySessions.map((session) => {

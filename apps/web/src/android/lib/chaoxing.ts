@@ -114,9 +114,26 @@ export function parseLeftTimeMinutes(text: string): number | null {
   return Number.isSafeInteger(total) ? total : null
 }
 
+const EXPIRED_WORK_RE = /已过期|已截止|已结束|超时|逾期|无法提交|不能提交/
+
+export function isChaoxingWorkExpired(
+  work: Pick<ChaoxingWork, 'status' | 'leftTime' | 'uncommitted' | 'expired'>
+): boolean {
+  if (!work.uncommitted) return false
+  if (work.expired) return true
+  const status = String(work.status || '').trim()
+  const leftTime = String(work.leftTime || '').trim()
+  if (EXPIRED_WORK_RE.test(status) || EXPIRED_WORK_RE.test(leftTime)) return true
+  if (/(?:天|小时|分钟|分)/.test(leftTime)) {
+    const mins = parseLeftTimeMinutes(leftTime)
+    if (mins !== null && mins <= 0) return true
+  }
+  return false
+}
+
 export function buildChaoxingTodos(works: ChaoxingWork[], exams: ChaoxingExam[]): ChaoxingTodo[] {
   const pending = [
-    ...works.filter((work) => work.uncommitted).map((work) => ({ ...work, kind: 'work' as const })),
+    ...works.filter((work) => work.uncommitted && !isChaoxingWorkExpired(work)).map((work) => ({ ...work, kind: 'work' as const })),
     ...exams.filter((exam) => !exam.finished && !exam.expired).map((exam) => ({ ...exam, kind: 'exam' as const }))
   ]
   return pending.map((item) => {
@@ -181,17 +198,20 @@ function buildReadPageJs(kind: 'work' | 'exam'): string {
         const stateEl = option.querySelector('span:nth-of-type(1)');
         const status = norm(stateEl ? stateEl.textContent : '');
         const cls = String((stateEl && stateEl.className) || '');
-        const uncommitted = cls.includes('status') || /未交|待提交|待完成|未完成|重做/.test(status);
         const course = text(option, 'span:nth-of-type(2)');
         const leftTime = text(option, '.fr') || text(option, '.time');
+        const expired = /已过期|已截止|已结束|超时|逾期|无法提交|不能提交/.test(status + ' ' + leftTime)
+          || /expired|overdue|timeout/i.test(cls + ' ' + String(row.className || ''));
+        const uncommitted = cls.includes('status') || /未交|待提交|待完成|未完成|重做/.test(status);
         items.push({
           title,
           courseId,
           url: href || (base + '/work/stu-work'),
           workId: id,
           clazzId: params.get('clazzId') || params.get('classId') || '',
-          status: status || (uncommitted ? '待提交' : '已提交'),
+          status: status || (expired ? '已过期' : uncommitted ? '待提交' : '已提交'),
           uncommitted,
+          expired,
           course,
           leftTime
         });
@@ -469,27 +489,49 @@ function activityListUrl({ courseId, clazzId }: ChaoxingCourse, params?: Record<
   })
 }
 
+export function activityPageUrl({ courseId, clazzId }: Pick<ChaoxingCourse, 'courseId' | 'clazzId'>) {
+  return courseUrl(MOBILE_ORIGIN, '/widget/pcpick/stu/index', {
+    courseId, jclassId: clazzId
+  })
+}
+
+export function sanitizeChaoxingActivityUrl(
+  rawUrl: string,
+  course: Pick<ChaoxingCourse, 'courseId' | 'clazzId'>
+): string {
+  const fallback = activityPageUrl(course)
+  const candidate = field(rawUrl)
+  if (!candidate) return fallback
+  try {
+    const target = new URL(candidate, MOBILE_ORIGIN)
+    if (
+      /^https?:$/.test(target.protocol) &&
+      target.hostname.endsWith('.chaoxing.com') &&
+      !target.port &&
+      !target.username &&
+      !target.password &&
+      !/\/(?:v\d+\/)?apis?(?:\/|$)/i.test(target.pathname)
+    ) {
+      target.protocol = 'https:'
+      return target.href
+    }
+  } catch { /* Fall back to the interactive student activity H5 page. */ }
+  return fallback
+}
+
 function readCourseActivities(raw: any, course: ChaoxingCourse): ChaoxingActivity[] {
   const { courseId, clazzId, courseName } = course
   const list = [raw?.data?.activeList, raw?.data?.list, raw?.data?.data, raw?.activeList, raw?.data, raw].find(Array.isArray)
   if (!list || raw?.result === false || raw?.success === false) {
     throw new ChaoxingParseError('Unexpected Chaoxing activity list')
   }
-  const fallback = activityListUrl(course)
   return list.map((item) => {
     const activeId = field(item?.id ?? item?.activeId)
     const title = field(item?.nameOne ?? item?.name ?? item?.title)
     if (!activeId || !title) throw new ChaoxingParseError('Invalid Chaoxing activity')
     const ongoing = Number(item.status) === 1
     const finished = Number(item.status) === 2
-    let href = fallback
-    try {
-      const target = new URL(field(item.url), MOBILE_ORIGIN)
-      if (item.url && /^https?:$/.test(target.protocol) && target.hostname.endsWith('.chaoxing.com') && !target.username && !target.password) {
-        target.protocol = 'https:'
-        href = target.href
-      }
-    } catch { /* Use the course activity list. */ }
+    const href = sanitizeChaoxingActivityUrl(field(item.url), course)
     return {
       activeId, title, courseId, clazzId, courseName, ongoing, finished,
       type: activityTypes[field(item.activeType)] || '课堂活动',

@@ -52,16 +52,24 @@ const COURSE_JS = String.raw`(() => {
 
   const parsePeriods = (s) =>
     String(s || '')
-      .split(/[，,]/)
+      .replace(/[第节]/g, '')
+      .replace(/\s*([-~～—–至])\s*/g, '$1')
+      .split(/[，,、\s]+/)
       .flatMap((part) => {
-        const m = part.match(/(\d+)\s*-\s*(\d+)/);
+        const clean = part.trim();
+        if (!clean) return [];
+        const m = clean.match(/^(\d+)\s*[-~～—–至]\s*(\d+)$/);
         if (m) {
+          const from = Number(m[1]);
+          const to = Number(m[2]);
           const out = [];
-          for (let i = Number(m[1]); i <= Number(m[2]); i++) out.push(i);
+          if (Number.isFinite(from) && Number.isFinite(to) && from > 0 && to >= from && to <= 20) {
+            for (let i = from; i <= to; i++) out.push(i);
+          }
           return out;
         }
-        const n = Number(part.trim());
-        return Number.isFinite(n) && n > 0 ? [n] : [];
+        const n = Number(clean);
+        return Number.isFinite(n) && n > 0 && n <= 20 ? [n] : [];
       });
 
   const parseSlots = (cells) => {
@@ -70,12 +78,17 @@ const COURSE_JS = String.raw`(() => {
       const weeks = cells[i] || '';
       const when = cells[i + 1] || '';
       const room = cells[i + 2] || '';
-      const m = when.match(/星期([一二三四五六日])\s*\[([^\]]*)节\]/);
+      const m =
+        when.match(/(?:星期|周)([一二三四五六日天])\s*[\[【(（]\s*([^\]】)）]+?)\s*节?\s*[\]】)）]/) ||
+        when.match(/(?:星期|周)([一二三四五六日天])\s*(?:第\s*)?(\d+(?:\s*[-~～—–至,，、]\s*\d+)*)\s*节/);
       if (!m) continue;
+      const wd = m[1] === '天' ? '日' : m[1];
+      const periods = parsePeriods(m[2]);
+      if (!periods.length) continue;
       slots.push({
         weeks: weeks,
-        weekday: '一二三四五六日'.indexOf(m[1]) + 1,
-        periods: parsePeriods(m[2]),
+        weekday: '一二三四五六日'.indexOf(wd) + 1,
+        periods: periods,
         room: room
       });
     }
