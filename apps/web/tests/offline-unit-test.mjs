@@ -57,7 +57,14 @@ import {
   readChaoxingAccount,
   rememberChaoxingAccount
 } from '../src/android/lib/chaoxing-auth.ts'
-import { buildApkDownloadUrls, buildManifestUrls, isUpdateRepoConfigured } from '../src/update-config.ts'
+import { buildApkDownloadUrls, buildManifestUrls, buildSponsorsUrls, isUpdateRepoConfigured } from '../src/update-config.ts'
+import { blocksSchoolAutoLogin, classifySchoolPage } from '../src/android/lib/eams.ts'
+import {
+  DEFAULT_SPONSORS_MANIFEST,
+  fetchRemoteSponsors,
+  normalizeSponsorsManifest,
+  readCachedSponsors
+} from '../src/sponsors-remote.ts'
 import { compareSemver, pickBestRelease, shouldAutoCheckToday } from '../src/updater.ts'
 import { hasExistingUserConfig, readChaoxingSnapshot } from '../src/snapshot.ts'
 
@@ -1480,6 +1487,117 @@ async function runTests() {
   assert.equal(okRes3.status, 'ok')
   assert.equal(csrfFetchCount, 3) // resetSession forced fresh CSRF fetch
   assert.equal(txCount, 4)
+
+  // 53. sponsors-remote.ts: 云端赞助排行多路 URL、归一化排序/过滤、缓存落盘与断网静默回退
+  const sponsorUrls = buildSponsorsUrls('owner/repo', 'main', 12345)
+  assert.equal(sponsorUrls.length, 5)
+  assert.ok(sponsorUrls[0].includes('edgeone.gh-proxy.com') && sponsorUrls[0].includes('sponsors.json?t=12345'))
+  assert.ok(sponsorUrls[sponsorUrls.length - 1].includes('cdn.jsdelivr.net/gh/owner/repo@main/sponsors.json'))
+
+  const normalizedSponsors = normalizeSponsorsManifest({
+    schemaVersion: 1,
+    published: true,
+    title: ' 致谢名单 ',
+    subtitle: '感谢每一位支持者',
+    entries: [
+      { name: '小明', amount: 10, date: '2026-11-26', note: '加油' },
+      { name: '匿名隐藏', amount: 99, hidden: true },
+      { name: '无效零元', amount: 0 },
+      { name: '   ', amount: 50 },
+      { name: '小红', amount: 25.556 },
+      { name: '小刚', amount: 10, note: '同金额后到' }
+    ]
+  })
+  assert.ok(normalizedSponsors)
+  assert.equal(normalizedSponsors.title, '致谢名单')
+  assert.deepEqual(
+    normalizedSponsors.entries.map((e) => [e.name, e.amount]),
+    [
+      ['小红', 25.56],
+      ['小明', 10],
+      ['小刚', 10]
+    ]
+  )
+  assert.equal(normalizedSponsors.entries[1].note, '加油')
+  assert.equal(normalizedSponsors.entries[1].date, '2026-11-26')
+
+  const unpublishedSponsors = normalizeSponsorsManifest({ published: false, entries: [] })
+  assert.equal(unpublishedSponsors?.published, false)
+  assert.equal(normalizeSponsorsManifest({ nope: true }), null)
+
+  const sponsorMem = new Map()
+  const sponsorStorage = {
+    getItem: (k) => (sponsorMem.has(k) ? sponsorMem.get(k) : null),
+    setItem: (k, v) => { sponsorMem.set(k, String(v)) }
+  }
+  const okSponsors = await fetchRemoteSponsors({
+    repo: 'owner/repo',
+    storage: sponsorStorage,
+    fetcher: async (urls) => ({
+      url: urls[0],
+      body: JSON.stringify({
+        schemaVersion: 1,
+        published: true,
+        title: '远端标题',
+        subtitle: '远端副标题',
+        entries: [
+          { name: '甲', amount: 6.66 },
+          { name: '乙', amount: 18.88, note: '好用' }
+        ]
+      })
+    })
+  })
+  assert.equal(okSponsors.ok, true)
+  assert.equal(okSponsors.fromCache, false)
+  assert.equal(okSponsors.manifest.entries[0].name, '乙')
+  assert.equal(readCachedSponsors(sponsorStorage)?.entries.length, 2)
+
+  const fallbackSponsors = await fetchRemoteSponsors({
+    repo: 'owner/repo',
+    storage: sponsorStorage,
+    fallback: DEFAULT_SPONSORS_MANIFEST,
+    fetcher: async () => { throw new Error('network down') }
+  })
+  assert.equal(fallbackSponsors.ok, false)
+  assert.equal(fallbackSponsors.fromCache, true)
+  assert.equal(fallbackSponsors.manifest.title, '远端标题')
+  assert.equal(fallbackSponsors.manifest.entries[0].name, '乙')
+
+  // 54. 无感登录抗抖动与空调账号隔离回归（eams.ts + aircon-session.mjs）
+  assert.equal(classifySchoolPage('https://jwgl-haust-edu-cn-s.haust.edu.cn/eams/homeExt.action'), 'eams')
+  assert.equal(classifySchoolPage('https://cas.haust.edu.cn/cas/login'), 'expired')
+  assert.equal(classifySchoolPage('https://jwgl-haust-edu-cn-s.haust.edu.cn/eams/loginExt.action'), 'expired')
+  assert.equal(classifySchoolPage('load-error:-2:ERR_INTERNET_DISCONNECTED'), 'network')
+  assert.equal(classifySchoolPage('load-timeout:'), 'timeout')
+  assert.equal(classifySchoolPage('load-cancelled:'), 'cancelled')
+  assert.equal(blocksSchoolAutoLogin('credentials'), true)
+  assert.equal(blocksSchoolAutoLogin('locked'), true)
+  assert.equal(blocksSchoolAutoLogin('captcha'), true)
+  assert.equal(blocksSchoolAutoLogin('network'), false)
+  assert.equal(blocksSchoolAutoLogin('timeout'), false)
+  assert.equal(blocksSchoolAutoLogin('cancelled'), false)
+
+  let airconBootstrapCalls = 0
+  const airconSess = createCloudPaymentSession(
+    async (url, headers) => {
+      if (url.includes('checkRoomCount.do')) {
+        return { status: 200, data: 'ok', location: '', setCookies: ['SESSION=sid-' + airconBootstrapCalls + '; Path=/CloudPayment'] }
+      }
+      return { status: 200, data: JSON.stringify({ cookie: headers.Cookie || '' }), location: '', setCookies: [] }
+    },
+    async () => {
+      airconBootstrapCalls += 1
+      return { cookies: `SESSION=boot-${airconBootstrapCalls}` }
+    }
+  )
+  const airconA = await airconSess('https://h5cloud.17wanxiao.com:18443/CloudPayment/user/getRoomState.do')
+  assert.equal(airconBootstrapCalls, 1)
+  assert.ok(String(airconA.data).includes('1'))
+  airconSess.reset()
+  const airconB = await airconSess('https://h5cloud.17wanxiao.com:18443/CloudPayment/user/getRoomState.do')
+  assert.equal(airconBootstrapCalls, 2)
+  assert.ok(String(airconB.data).includes('2'))
+  assert.notEqual(airconA.data, airconB.data)
 
   console.log('ALL OFFLINE UNIT TESTS PASSED')
 }

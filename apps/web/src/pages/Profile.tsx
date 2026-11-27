@@ -3,7 +3,14 @@ import type { Ref } from 'react'
 import { Icon } from '../icons'
 import { haptic } from '../haptics'
 import { data, supportsSaveImageToGallery } from '../api'
-import { REWARD_QR_IMAGE, SPONSORS } from '../sponsors'
+import {
+  DEFAULT_SPONSORS_MANIFEST,
+  REWARD_QR_IMAGE,
+  SPONSORS,
+  fetchRemoteSponsors,
+  readCachedSponsors,
+  type SponsorsManifest
+} from '../sponsors'
 import appIconUrl from '../assets/app-icon.png'
 import type { Theme } from '../theme'
 import type { SessionStatus } from '../types'
@@ -159,17 +166,61 @@ export function Profile(props: ProfileProps) {
   const [query, setQuery] = useState('')
   const [savingQr, setSavingQr] = useState(false)
   const [qrSaved, setQrSaved] = useState(false)
+  const [sponsorsState, setSponsorsState] = useState<{
+    manifest: SponsorsManifest
+    hasCache: boolean
+    loading: boolean
+  }>(() => {
+    const cached = readCachedSponsors()
+    const fallback: SponsorsManifest = { ...DEFAULT_SPONSORS_MANIFEST, entries: SPONSORS }
+    return {
+      manifest: cached ?? fallback,
+      hasCache: Boolean(cached),
+      loading: false
+    }
+  })
+  const sponsorsReqId = useRef(0)
   const qrSavedTimer = useRef<number | null>(null)
   const searchInput = useRef<HTMLInputElement>(null)
   const subHeading = useRef<HTMLHeadingElement>(null)
   const aboutTrigger = useRef<HTMLButtonElement>(null)
 
   useEffect(() => () => {
+    sponsorsReqId.current += 1
     if (qrSavedTimer.current !== null) window.clearTimeout(qrSavedTimer.current)
   }, [])
 
   const page = props.subPage ?? internalPage
   const prevPage = useRef<ProfileSubPage>(page)
+
+  const refreshSponsors = async (manual: boolean) => {
+    const reqId = ++sponsorsReqId.current
+    if (manual) haptic('light')
+    setSponsorsState((prev) => ({ ...prev, loading: true }))
+    const res = await fetchRemoteSponsors({
+      fallback: { ...DEFAULT_SPONSORS_MANIFEST, entries: SPONSORS }
+    })
+    if (reqId !== sponsorsReqId.current) return
+    setSponsorsState({
+      manifest: res.manifest,
+      hasCache: res.ok || res.fromCache,
+      loading: false
+    })
+    if (manual) {
+      if (res.ok) {
+        haptic('success')
+        props.onToast?.('致谢名单已更新')
+      } else {
+        props.onToast?.('暂时无法同步云端名单，已展示本地内容')
+      }
+    }
+  }
+
+  useEffect(() => {
+    if (page === 'support') {
+      void refreshSponsors(false)
+    }
+  }, [page])
 
   useEffect(() => {
     if (page !== prevPage.current) {
@@ -344,9 +395,11 @@ export function Profile(props: ProfileProps) {
 
   /* ── 捐赠支持子页 ── */
   if (page === 'support') {
-    const sorted = [...SPONSORS].sort((a, b) => b.amount - a.amount)
+    const { manifest, hasCache, loading } = sponsorsState
+    const sorted = manifest.entries
     const podium = sorted.length >= 3 ? [sorted[1], sorted[0], sorted[2]] : []
     const rest = sorted.length >= 3 ? sorted.slice(3) : sorted
+    const showInitialLoading = loading && !hasCache && sorted.length === 0
 
     return (
       <div key="support" className={`profile-system pf-page ${pageAnimClass}`}>
@@ -405,49 +458,79 @@ export function Profile(props: ProfileProps) {
           </p>
         </section>
 
-        <section className="pf-card pf-sponsor-card" aria-label="感谢投喂">
-          <div className="pf-sponsor-head">
-            <h2>感谢你的投喂喵～</h2>
-            <p>未来也会持续更新优化！</p>
-          </div>
-
-          {podium.length === 3 ? (
-            <div className="pf-podium" aria-label="前三名致谢">
-              {podium.map((entry, idx) => {
-                const rank = idx === 1 ? 1 : idx === 0 ? 2 : 3
-                return (
-                  <div key={`${entry.name}-${rank}`} className={`pf-podium-col rank-${rank}`}>
-                    <span className="pf-podium-medal" aria-hidden="true">
-                      {rank === 1 ? '🥇' : rank === 2 ? '🥈' : '🥉'}
-                    </span>
-                    <b className="pf-podium-name">{entry.name}</b>
-                    <span className="pf-podium-amt">¥{entry.amount.toFixed(2)}</span>
-                    <div className="pf-podium-pillar">{rank}</div>
-                  </div>
-                )
-              })}
-            </div>
-          ) : null}
-
-          {rest.length > 0 ? (
-            <div className="pf-sponsor-list">
-              <div className="pf-sponsor-list-head">
-                <span>昵称</span>
-                <span>赞赏金额</span>
+        {manifest.published ? (
+          <section className="pf-card pf-sponsor-card" aria-label="感谢投喂">
+            <div className="pf-sponsor-head-row">
+              <div className="pf-sponsor-head">
+                <h2>{manifest.title}</h2>
+                <p>{manifest.subtitle}</p>
               </div>
-              {rest.map((entry, idx) => (
-                <div key={`${entry.name}-${idx}`} className="pf-sponsor-row">
-                  <span>{entry.name}</span>
-                  <b>¥{entry.amount.toFixed(2)}</b>
+              <button
+                type="button"
+                className="pf-sponsor-refresh"
+                aria-label="刷新致谢名单"
+                disabled={loading}
+                onClick={() => void refreshSponsors(true)}
+              >
+                <Icon name="refresh" className={loading ? 'pf-spin' : undefined} />
+              </button>
+            </div>
+
+            {podium.length === 3 ? (
+              <div className="pf-podium" aria-label="前三名致谢">
+                {podium.map((entry, idx) => {
+                  const rank = idx === 1 ? 1 : idx === 0 ? 2 : 3
+                  return (
+                    <div key={`${entry.name}-${rank}`} className={`pf-podium-col rank-${rank}`}>
+                      <span className="pf-podium-medal" aria-hidden="true">
+                        {rank === 1 ? '🥇' : rank === 2 ? '🥈' : '🥉'}
+                      </span>
+                      <b className="pf-podium-name">{entry.name}</b>
+                      <span className="pf-podium-amt">¥{entry.amount.toFixed(2)}</span>
+                      {entry.note ? (
+                        <small className="pf-podium-note" title={entry.note}>“{entry.note}”</small>
+                      ) : null}
+                      <div className="pf-podium-pillar">{rank}</div>
+                    </div>
+                  )
+                })}
+              </div>
+            ) : null}
+
+            {rest.length > 0 ? (
+              <div className="pf-sponsor-list">
+                <div className="pf-sponsor-list-head">
+                  <span>昵称</span>
+                  <span>赞赏金额</span>
                 </div>
-              ))}
-            </div>
-          ) : (
-            <div className="pf-sponsor-empty">
-              <span>虚位以待，成为第一位投喂科小喵的同学～</span>
-            </div>
-          )}
-        </section>
+                {rest.map((entry, idx) => {
+                  const meta = [entry.note, entry.date].filter(Boolean).join(' · ')
+                  const medal = podium.length === 0 ? (idx === 0 ? '🥇' : idx === 1 ? '🥈' : null) : null
+                  return (
+                    <div key={`${entry.name}-${idx}`} className="pf-sponsor-row">
+                      <span className="pf-sponsor-person-wrap">
+                        {medal ? <span className="pf-sponsor-row-medal" aria-hidden="true">{medal}</span> : null}
+                        <span className="pf-sponsor-person">
+                          <span className="pf-sponsor-person-name">{entry.name}</span>
+                          {meta ? <small className="pf-sponsor-person-meta">{meta}</small> : null}
+                        </span>
+                      </span>
+                      <b>¥{entry.amount.toFixed(2)}</b>
+                    </div>
+                  )
+                })}
+              </div>
+            ) : podium.length === 0 ? (
+              <div className="pf-sponsor-empty">
+                <span>
+                  {showInitialLoading
+                    ? '正在同步最新致谢名单…'
+                    : '虚位以待，成为第一位投喂科小喵的同学～'}
+                </span>
+              </div>
+            ) : null}
+          </section>
+        ) : null}
       </div>
     )
   }

@@ -93,6 +93,11 @@ type AppUpdaterNativePlugin = {
 
 const AppUpdaterNative = registerPlugin<AppUpdaterNativePlugin>('AppUpdater')
 
+/** 复用原生 AppUpdater.fetchManifest 通道（OkHttp 多路加速，无 CORS 限制） */
+export async function fetchManifestViaNative(urls: string[]): Promise<{ body: string; url: string }> {
+  return AppUpdaterNative.fetchManifest({ urls })
+}
+
 /* ---------------- 纯函数：SemVer + Beta 渠道比较 ---------------- */
 
 type ParsedSemver = {

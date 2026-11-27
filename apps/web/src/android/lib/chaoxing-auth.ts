@@ -45,7 +45,8 @@ export async function driveChaoxingAuth(
   browser: AuthBrowser,
   run: (script: string) => Promise<unknown>,
   request: ChaoxingRequest,
-  options: AuthOptions
+  options: AuthOptions,
+  background = false
 ) {
   const { signal, onProgress } = options
   onProgress({ type: 'stage', message: request.mode === 'qr' ? '正在获取学习通登录二维码…' : '正在连接学习通…' })
@@ -58,7 +59,7 @@ export async function driveChaoxingAuth(
     let qrImage: string | undefined
     let qrStatus: ReturnType<typeof classifyChaoxingQrStatus> | undefined
     let qrExpires = 0
-    let buttonDeadline = Date.now() + 25_000
+    let buttonDeadline = Date.now() + (background ? 15_000 : 25_000)
     let submissionDeadline = 0
     let riskUrl = ''
     let previousUrl = ''
@@ -66,7 +67,7 @@ export async function driveChaoxingAuth(
     let captchaCode = ''
     let captchaMessage = '请输入图片中的验证码'
     const refresh = () => { qrRefresh = true }
-    const deadline = Date.now() + 5 * 60_000
+    const deadline = Date.now() + (background ? 35_000 : 5 * 60_000)
 
     while (Date.now() < deadline) {
       const url = await readUrl()
@@ -74,7 +75,7 @@ export async function driveChaoxingAuth(
         await setRisk(false)
         if (request.mode === 'qr') onProgress({ type: 'qr', status: 'confirmed', dataUrl: qrImage, refresh })
         onProgress({ type: 'stage', message: '正在校验学习通会话…' })
-        await authDelay(1200, signal)
+        await authDelay(background ? 450 : 1200, signal)
         return
       }
       if (riskUrl && url !== riskUrl) {

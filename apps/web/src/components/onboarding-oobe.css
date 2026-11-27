@@ -3,10 +3,11 @@
   --oobe-tint: var(--tint, var(--bg));
   --oobe-gutter: clamp(16px, 5vw, 32px);
   --oobe-content-width: 500px;
+  position: fixed;
+  inset: 0;
+  z-index: 30;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  block-size: 100vh;
-  block-size: 100dvh;
   padding-block: var(--safe-top, env(safe-area-inset-top, 0px)) var(--safe-bottom, env(safe-area-inset-bottom, 0px));
   padding-inline: env(safe-area-inset-left, 0px) env(safe-area-inset-right, 0px);
   overflow: hidden;
@@ -247,11 +248,13 @@
   gap: 4px;
   padding: 7px 5px;
   border-radius: 11px;
+  background: var(--oobe-preview-paper);
   background: color-mix(in srgb, var(--oobe-preview-paper) 87%, var(--oobe-preview-tone));
 }
 
 .oobe-phone-screen > i {
   border-radius: 5px;
+  background: rgba(99, 102, 241, 0.22);
   background: color-mix(in srgb, var(--oobe-preview-tone) 24%, var(--oobe-preview-paper));
 }
 
@@ -261,6 +264,7 @@
 }
 
 .oobe-phone-screen > i:nth-child(2) {
+  background: rgba(99, 102, 241, 0.52);
   background: color-mix(in srgb, var(--oobe-preview-tone) 58%, var(--oobe-preview-paper));
 }
 
@@ -726,8 +730,8 @@
 
 .oobe-footer {
   display: grid;
-  gap: 4px;
-  padding-block: 10px 14px;
+  gap: 6px;
+  padding-block: 12px 18px;
   border-top: 1px solid var(--line);
   background: var(--bg);
 }

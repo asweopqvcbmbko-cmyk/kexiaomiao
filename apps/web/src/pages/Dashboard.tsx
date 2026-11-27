@@ -576,36 +576,98 @@ export function Dashboard(props: {
         </Modal>
       )}
 
-      {props.demoMode ? (
-        <div className="demo-banner" role="status">
-          <span className="demo-banner-text">当前为演示模式示例任务，登录学习通后查看真实作业与考试</span>
-          <button className="demo-banner-btn" type="button" onClick={props.onLogin}>
-            去登录
-          </button>
-        </div>
-      ) : null}
+      {(() => {
+        if (props.demoMode) {
+          return (
+            <div className="demo-banner" role="status">
+              <span className="demo-banner-text">当前为演示模式示例任务，登录学习通后查看真实作业与考试</span>
+              <button className="demo-banner-btn" type="button" onClick={props.onLogin}>
+                去登录
+              </button>
+            </div>
+          )
+        }
+        const recovery = dash?.recovery
 
-      {!props.demoMode && dash?.authRequired && hasCachedData ? (
-        <div className="demo-banner" role="status">
-          <span className="demo-banner-text">学习通登录已过期，当前显示上次缓存</span>
-          <button className="demo-banner-btn" type="button" onClick={props.onLogin}>
-            重新登录
-          </button>
-        </div>
-      ) : null}
+        if (props.loading && hasCachedData && (dash?.authRequired || recovery?.state === 'recovering')) {
+          return (
+            <div className="demo-banner is-recovering" role="status" aria-live="polite">
+              <span className="demo-banner-text">
+                <i className="sync-dot" aria-hidden="true" />
+                正在无感续登学习通…
+              </span>
+            </div>
+          )
+        }
 
-      {!props.demoMode && dash?.error && !dash.authRequired ? (
-        <div className="demo-banner" role="status">
-          <span className="demo-banner-text">
-            {dash.error === 'parse'
-              ? '学习通页面解析异常，请点右上角刷新或重新登录学习通'
-              : '学习通网络请求失败，请检查网络后点右上角刷新'}
-          </span>
-          <button className="demo-banner-btn" type="button" onClick={props.onRefresh}>
-            重试
-          </button>
-        </div>
-      ) : null}
+        if (recovery?.state === 'retryable' && hasCachedData) {
+          return (
+            <div className="demo-banner" role="status">
+              <span className="demo-banner-text">
+                {recovery.message || '学习通网络波动或续登冷却中，当前显示上次缓存'}
+              </span>
+              <button className="demo-banner-btn" type="button" onClick={props.onRefresh}>
+                立即重试
+              </button>
+            </div>
+          )
+        }
+
+        if (recovery?.state === 'no_credential' && hasCachedData) {
+          return (
+            <div className="demo-banner" role="status">
+              <span className="demo-banner-text">
+                {recovery.message || '当前为免密登录，会话已过期（勾选保存密码可开启自动续登）'}
+              </span>
+              <button className="demo-banner-btn" type="button" onClick={props.onLogin}>
+                重新登录
+              </button>
+            </div>
+          )
+        }
+
+        if (recovery?.state === 'risk_required' && hasCachedData) {
+          return (
+            <div className="demo-banner" role="status">
+              <span className="demo-banner-text">
+                {recovery.message || '学习通触发安全验证，请手动完成校验'}
+              </span>
+              <button className="demo-banner-btn" type="button" onClick={props.onLogin}>
+                去验证
+              </button>
+            </div>
+          )
+        }
+
+        if (dash?.authRequired && hasCachedData) {
+          return (
+            <div className="demo-banner" role="status">
+              <span className="demo-banner-text">
+                {recovery?.message || '学习通登录已过期，当前显示上次缓存'}
+              </span>
+              <button className="demo-banner-btn" type="button" onClick={props.onLogin}>
+                重新登录
+              </button>
+            </div>
+          )
+        }
+
+        if (dash?.error && !dash.authRequired) {
+          return (
+            <div className="demo-banner" role="status">
+              <span className="demo-banner-text">
+                {dash.error === 'parse'
+                  ? '学习通页面解析异常，请点右上角刷新或重新登录学习通'
+                  : '学习通网络请求失败，请检查网络后点右上角刷新'}
+              </span>
+              <button className="demo-banner-btn" type="button" onClick={props.onRefresh}>
+                重试
+              </button>
+            </div>
+          )
+        }
+        return null
+      })()}
 
       {!props.supported && !props.demoMode ? (
         <Empty

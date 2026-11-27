@@ -1381,7 +1381,17 @@ public class SchoolBrowserPlugin extends Plugin {
                 final boolean[] done = {false};
                 wv.setWebViewClient(new WebViewClient() {
                     @Override
+                    public void onPageStarted(WebView view, String u, android.graphics.Bitmap favicon) {
+                        if (u != null && !u.isEmpty()) {
+                            hiddenUrl = u;
+                        }
+                    }
+
+                    @Override
                     public void onPageFinished(WebView view, String u) {
+                        if (u != null && !u.isEmpty()) {
+                            hiddenUrl = u;
+                        }
                         // CAS 登录会连跳好几页：等 URL 连续两次不变再回，否则会把中间页当成落地页
                         settle(view, done, call, 900);
                         flushCookies();

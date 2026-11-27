@@ -72,9 +72,17 @@ export type ChaoxingSettings = {
   autoLoadProgress: boolean
 }
 
+export type ChaoxingRecoveryState = 'recovering' | 'retryable' | 'no_credential' | 'risk_required' | 'manual_required'
+export type ChaoxingRecoveryInfo = {
+  state: ChaoxingRecoveryState
+  retryAt?: number
+  message?: string
+}
+
 type ChaoxingCourseResult = {
   loggedIn: boolean
   authRequired?: boolean
+  recovery?: ChaoxingRecoveryInfo
   stale?: boolean
   courses: ChaoxingCourse[]
   fetchedAt: string
@@ -87,6 +95,7 @@ export type ChaoxingProgressResult = ChaoxingCourseResult & { progress: Chaoxing
 export type ChaoxingDashboard = {
   loggedIn: boolean
   authRequired?: boolean
+  recovery?: ChaoxingRecoveryInfo
   stale?: boolean
   error?: 'network' | 'parse'
   works: ChaoxingWork[]

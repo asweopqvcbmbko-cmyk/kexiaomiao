@@ -11,6 +11,7 @@ const ENV_REPO =
 export const UPDATE_GITHUB_REPO = ENV_REPO || 'asweopqvcbmbko-cmyk/kexiaomiao'
 export const UPDATE_MANIFEST_BRANCH = 'main'
 export const UPDATE_MANIFEST_FILE = 'update-manifest.json'
+export const SPONSORS_MANIFEST_FILE = 'sponsors.json'
 
 /** 国内 GitHub 加速代理前缀（按实测速度优先排序，最后回退到 GitHub 直连） */
 export const GITHUB_MIRROR_PREFIXES = [
@@ -23,21 +24,41 @@ export function isUpdateRepoConfigured(repo = UPDATE_GITHUB_REPO): boolean {
   return /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo) && !repo.startsWith('YOUR_GITHUB_USER/')
 }
 
-/** 生成版本清单（update-manifest.json）的多路加速 + 直连候选地址（优先实时源并带防缓存参数，jsDelivr 仅作最后兜底） */
-export function buildManifestUrls(
+/** 生成仓库根目录任意静态 JSON 的多路加速 + 直连候选地址（优先实时源并带防缓存参数，jsDelivr 仅作最后兜底） */
+export function buildRepoJsonUrls(
+  file: string,
   repo = UPDATE_GITHUB_REPO,
   branch = UPDATE_MANIFEST_BRANCH,
   cacheBuster = Date.now()
 ): string[] {
-  const rawGithub = `https://raw.githubusercontent.com/${repo}/${branch}/${UPDATE_MANIFEST_FILE}`
+  const cleanFile = file.replace(/^\/+/, '')
+  const rawGithub = `https://raw.githubusercontent.com/${repo}/${branch}/${cleanFile}`
   const bustedRaw = `${rawGithub}?t=${cacheBuster}`
-  const jsdelivr = `https://cdn.jsdelivr.net/gh/${repo}@${branch}/${UPDATE_MANIFEST_FILE}`
+  const jsdelivr = `https://cdn.jsdelivr.net/gh/${repo}@${branch}/${cleanFile}`
   const urls: string[] = [
     ...GITHUB_MIRROR_PREFIXES.map((prefix) => `${prefix}${bustedRaw}`),
     bustedRaw,
     jsdelivr
   ]
   return [...new Set(urls)]
+}
+
+/** 生成版本清单（update-manifest.json）的多路加速 + 直连候选地址 */
+export function buildManifestUrls(
+  repo = UPDATE_GITHUB_REPO,
+  branch = UPDATE_MANIFEST_BRANCH,
+  cacheBuster = Date.now()
+): string[] {
+  return buildRepoJsonUrls(UPDATE_MANIFEST_FILE, repo, branch, cacheBuster)
+}
+
+/** 生成云端赞助名单（sponsors.json）的多路加速 + 直连候选地址 */
+export function buildSponsorsUrls(
+  repo = UPDATE_GITHUB_REPO,
+  branch = UPDATE_MANIFEST_BRANCH,
+  cacheBuster = Date.now()
+): string[] {
+  return buildRepoJsonUrls(SPONSORS_MANIFEST_FILE, repo, branch, cacheBuster)
 }
 
 /** 为 APK 下载直链生成多路加速 + 原链回退列表 */

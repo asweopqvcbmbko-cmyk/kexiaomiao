@@ -33,7 +33,7 @@ import {
   saveNoticeBody,
   upsertNotices
 } from '../notice-db'
-import type { AuthOptions, AuthRequest, AuthResult, CaptchaAnswer, ChaoxingActivitiesResult, ChaoxingDashboard, ChaoxingProgressResult, CourseTable, NoticeBody, NoticeItem, SchoolLogin, SessionStatus } from '../types'
+import type { AuthOptions, AuthRequest, AuthResult, CaptchaAnswer, ChaoxingActivitiesResult, ChaoxingDashboard, ChaoxingProgressResult, ChaoxingRecoveryInfo, CourseTable, NoticeBody, NoticeItem, SchoolLogin, SessionStatus } from '../types'
 
 // Keep this UA aligned with SchoolBrowserPlugin.UA.
 const NOTICE_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36'
@@ -254,10 +254,11 @@ function keys(): string[] {
   return out
 }
 
-/** 清理与当前教务账号绑定的缓存（课表/考试/校园卡/会话/空调认证令牌/宿舍支付CSRF），保留宿舍房间绑定配置 */
+/** 清理与当前教务账号绑定的缓存（课表/考试/校园卡/会话/空调认证令牌与内存会话/宿舍支付CSRF），保留宿舍房间绑定配置 */
 function clearAccountCache() {
   noticeSessionVersion += 1
   dormElectricityService?.resetSession?.()
+  ;(readAircon as { reset?: () => void } | undefined)?.reset?.()
   for (const key of ['courses', 'exams', 'card', 'session', 'aircon.jwt']) {
     try {
       localStorage.removeItem(K(key))
@@ -424,6 +425,12 @@ async function verifyOnce(): Promise<{ ok: boolean; url: string; last: string }>
     } catch (_) {}
     await sleep(1500)
     await engine.load(HOME)
+  } else {
+    const pageKind = eams.classifySchoolPage(landed)
+    if (pageKind === 'expired' || pageKind === 'network' || pageKind === 'timeout' || pageKind === 'cancelled') {
+      log('verify short-circuit', pageKind)
+      return { ok: false, url: landed, last: `kind=${pageKind}` }
+    }
   }
   let last = ''
   for (let i = 0; i < 8; i++) {
@@ -742,6 +749,12 @@ async function loginSchoolSilently(request: SchoolLogin, options: AuthOptions): 
     return status
   } catch (error) {
     if (identityCleared) await clearSchoolCookies().catch(() => false)
+    // 取消、网络抖动或超时不是凭据/风控错误，复位熔断与冷却避免永久阻塞后续自动续登
+    const reason = authFailureReason(error)
+    if (!eams.blocksSchoolAutoLogin(reason)) {
+      autoLoginTripped = false
+      writeLastAutoLoginAt(0)
+    }
     throw error
   }
 }
@@ -818,8 +831,14 @@ async function ensureSession(
     autoLoginTripped = false
     emitSession(session)
     return verifyPortal ? { ...session, portalReady } : session
-  } catch (_) {
-    autoLoginTripped = true
+  } catch (error) {
+    const reason = authFailureReason(error)
+    if (eams.blocksSchoolAutoLogin(reason)) {
+      autoLoginTripped = true
+    } else {
+      // 网络抖动或超时不触发进程级熔断且清除 5 分钟冷却，联网恢复后即可自动重试
+      writeLastAutoLoginAt(0)
+    }
     return finalizeLoggedOut()
   }
 }
@@ -871,48 +890,54 @@ function parseJwtExp(jwt: string): number {
   }
 }
 
-/** 复用本机 Keystore 凭据，通过公开 RSA 公钥加密换取 30 天 idToken（单次失败即冷却 10 分钟，绝不连打） */
+/** 复用本机 Keystore 凭据，通过公开 RSA 公钥加密换取 30 天 idToken（合并并发请求，单次失败冷却 10 分钟，软续期失败优先保留未过期令牌） */
 async function fetchAirconIdToken(): Promise<{ token: string; error?: string }> {
   const cred = await readCred().catch(() => null)
   if (!cred?.username || !cred?.password) {
     return { token: '', error: 'NO_SAVED_CREDENTIAL' }
   }
+  const activeAccount = localStorage.getItem(SCHOOL_IDENTITY_KEY)
+  if (activeAccount && activeAccount !== cred.username) {
+    return { token: '', error: 'ACCOUNT_MISMATCH' }
+  }
   const cached = read<{ token: string; exp: number; username: string }>('aircon.jwt')
-  if (
-    cached?.token &&
-    cached.username === cred.username &&
-    cached.exp * 1000 - Date.now() > 24 * 60 * 60 * 1000
-  ) {
-    return { token: cached.token }
+  const cachedValid = Boolean(cached?.token && cached.username === cred.username && cached.exp * 1000 - Date.now() > 60_000)
+  if (cachedValid && cached!.exp * 1000 - Date.now() > 24 * 60 * 60 * 1000) {
+    return { token: cached!.token }
   }
-  try {
-    const lastFail = Number(localStorage.getItem(AIRCON_FAIL_TS_KEY)) || 0
-    if (Date.now() - lastFail < AIRCON_FAIL_COOLDOWN_MS) {
-      return { token: '', error: 'CAS_TOKEN_ERROR:电费认证冷却中（防锁号保护），请稍后重试' }
-    }
-  } catch (_) {}
+  return single('aircon:idtoken:' + cred.username, async () => {
+    try {
+      const lastFail = Number(localStorage.getItem(AIRCON_FAIL_TS_KEY)) || 0
+      if (Date.now() - lastFail < AIRCON_FAIL_COOLDOWN_MS) {
+        if (cachedValid) return { token: cached!.token }
+        return { token: '', error: 'CAS_TOKEN_ERROR:电费认证冷却中（防锁号保护），请稍后重试' }
+      }
+    } catch (_) {}
 
-  try {
-    const res = await browser.casTokenLogin({
-      username: cred.username,
-      password: cred.password,
-      deviceId: getAirconDeviceId()
-    })
-    const payload = typeof res.data === 'string' && res.data ? JSON.parse(res.data) : {}
-    const token = String(payload?.data?.idToken || payload?.idToken || '')
-    if (res.status === 200 && token) {
-      const exp = parseJwtExp(token) || Math.floor(Date.now() / 1000) + 25 * 86400
-      write('aircon.jwt', { token, exp, username: cred.username })
-      try { localStorage.removeItem(AIRCON_FAIL_TS_KEY) } catch (_) {}
-      return { token }
+    try {
+      const res = await browser.casTokenLogin({
+        username: cred.username,
+        password: cred.password,
+        deviceId: getAirconDeviceId()
+      })
+      const payload = typeof res.data === 'string' && res.data ? JSON.parse(res.data) : {}
+      const token = String(payload?.data?.idToken || payload?.idToken || '')
+      if (res.status === 200 && token) {
+        const exp = parseJwtExp(token) || Math.floor(Date.now() / 1000) + 25 * 86400
+        write('aircon.jwt', { token, exp, username: cred.username })
+        try { localStorage.removeItem(AIRCON_FAIL_TS_KEY) } catch (_) {}
+        return { token }
+      }
+      try { localStorage.setItem(AIRCON_FAIL_TS_KEY, String(Date.now())) } catch (_) {}
+      if (cachedValid) return { token: cached!.token }
+      const msg = payload?.message || payload?.msg || `HTTP ${res.status}`
+      return { token: '', error: `CAS_TOKEN_ERROR:统一身份认证换取电费令牌失败（${msg}）` }
+    } catch (e: any) {
+      try { localStorage.setItem(AIRCON_FAIL_TS_KEY, String(Date.now())) } catch (_) {}
+      if (cachedValid) return { token: cached!.token }
+      return { token: '', error: `CAS_TOKEN_ERROR:统一身份认证网络异常（${e?.message || 'network'}）` }
     }
-    try { localStorage.setItem(AIRCON_FAIL_TS_KEY, String(Date.now())) } catch (_) {}
-    const msg = payload?.message || payload?.msg || `HTTP ${res.status}`
-    return { token: '', error: `CAS_TOKEN_ERROR:统一身份认证换取电费令牌失败（${msg}）` }
-  } catch (e: any) {
-    try { localStorage.setItem(AIRCON_FAIL_TS_KEY, String(Date.now())) } catch (_) {}
-    return { token: '', error: `CAS_TOKEN_ERROR:统一身份认证网络异常（${e?.message || 'network'}）` }
-  }
+  })
 }
 
 const readAircon = createCloudPaymentSession(async (url, headers) => {
@@ -1148,6 +1173,7 @@ function cachedChaoxingCourses<T extends ChaoxingActivitiesResult | ChaoxingProg
         ...(cached ? filterResult(cached, ignoredCourses) : empty),
         loggedIn: !authRequired && !!cached,
         authRequired,
+        ...(authRequired && lastChaoxingRecovery ? { recovery: lastChaoxingRecovery } : {}),
         stale: !!cached,
         error: authRequired ? undefined : error instanceof chaoxing.ChaoxingParseError ? 'parse' : 'network'
       }
@@ -1167,20 +1193,44 @@ const CHAOXING_HOSTS = [
   'stat2-ans.chaoxing.com', 'im.chaoxing.com'
 ].join(',')
 
+let lastChaoxingRecovery: ChaoxingRecoveryInfo | undefined
+
 function resetChaoxingAutoLogin() {
   chaoxingAutoLoginTripped = false
+  lastChaoxingRecovery = undefined
   writeLastAutoLoginAt(0, CHAOXING_AUTO_LOGIN_TS_KEY)
 }
 
 async function silentReloginChaoxing(): Promise<boolean> {
   await checkRuntimeVersion()
   const now = Date.now()
-  if (chaoxingAutoLoginTripped || now - readLastAutoLoginAt(CHAOXING_AUTO_LOGIN_TS_KEY) < AUTO_LOGIN_COOLDOWN_MS) return false
+  if (chaoxingAutoLoginTripped) {
+    lastChaoxingRecovery = lastChaoxingRecovery || {
+      state: 'risk_required',
+      message: '学习通触发安全验证或凭据异常，请手动重新登录'
+    }
+    return false
+  }
+  const lastAt = readLastAutoLoginAt(CHAOXING_AUTO_LOGIN_TS_KEY)
+  if (now - lastAt < AUTO_LOGIN_COOLDOWN_MS) {
+    lastChaoxingRecovery = {
+      state: 'retryable',
+      retryAt: lastAt + AUTO_LOGIN_COOLDOWN_MS,
+      message: '学习通续登冷却中，当前显示上次缓存'
+    }
+    return false
+  }
   const credential = await readChaoxingCred().catch((error: unknown) => {
     log('silentReloginChaoxing fail', authFailureReason(error))
     return null
   })
-  if (!credential) return false
+  if (!credential) {
+    lastChaoxingRecovery = {
+      state: 'no_credential',
+      message: '当前为免密登录，会话已过期（勾选保存密码可开启自动续登）'
+    }
+    return false
+  }
 
   writeLastAutoLoginAt(now, CHAOXING_AUTO_LOGIN_TS_KEY)
   const controller = new AbortController()
@@ -1204,20 +1254,33 @@ async function silentReloginChaoxing(): Promise<boolean> {
       onProgress: (event) => {
         if (event.type === 'captcha' || (event.type === 'risk' && event.revealed)) controller.abort()
       }
-    })
-    await authDelay(350, controller.signal)
-    const dashboard = await chaoxing.fetchChaoxingDashboard(engine)
-    if (dashboard.loggedIn && !dashboard.authRequired) {
-      chaoxingReloginGeneration += 1
-      return true
-    }
-    log('silentReloginChaoxing fail', dashboard.authRequired ? 'verification' : 'network')
-    return false
+    }, true)
+    // 省去重复的全量看板验活：由紧接着的外层业务请求直接完成首次验活与取数
+    chaoxingReloginGeneration += 1
+    lastChaoxingRecovery = undefined
+    return true
   } catch (error) {
     const reason = controller.signal.aborted ? 'captcha' : authFailureReason(error)
     log('silentReloginChaoxing fail', reason)
-    if (reason === 'captcha' || reason === 'credentials' || reason === 'locked' || reason === 'rate_limit') {
+    if (reason === 'captcha' || reason === 'rate_limit') {
       chaoxingAutoLoginTripped = true
+      lastChaoxingRecovery = {
+        state: 'risk_required',
+        message: '学习通触发安全验证，请手动完成校验'
+      }
+    } else if (reason === 'credentials' || reason === 'locked') {
+      chaoxingAutoLoginTripped = true
+      lastChaoxingRecovery = {
+        state: 'manual_required',
+        message: '学习通账号凭据失效或被锁定，请重新登录'
+      }
+    } else {
+      // 网络抖动或超时不触发进程熔断且清除冷却，联网后可直接重试
+      writeLastAutoLoginAt(0, CHAOXING_AUTO_LOGIN_TS_KEY)
+      lastChaoxingRecovery = {
+        state: 'retryable',
+        message: '学习通网络波动，当前显示上次缓存'
+      }
     }
     return false
   }
@@ -1356,9 +1419,19 @@ export const androidApi = {
       }
       if (version !== chaoxingCacheVersion) return empty
       const cached = readChaoxingSnapshot()
+      const recovery = result.authRequired
+        ? lastChaoxingRecovery || { state: 'manual_required' as const }
+        : result.error === 'network'
+          ? { state: 'retryable' as const, message: '学习通网络请求失败，当前显示上次缓存' }
+          : undefined
       return cached ? {
-        ...cached, loggedIn: !result.authRequired, stale: true, authRequired: result.authRequired, error: result.error
-      } : result
+        ...cached,
+        loggedIn: !result.authRequired,
+        stale: true,
+        authRequired: result.authRequired,
+        ...(recovery ? { recovery } : {}),
+        error: result.error
+      } : { ...result, ...(recovery ? { recovery } : {}) }
     }))
   },
 
@@ -1433,8 +1506,8 @@ export const androidApi = {
         try {
           const data = await run()
           log('exams', data && Array.isArray(data.exams) ? data.exams.length : 'none')
-          // 教务未发布考试安排时返回空数组属于可信空数据，不误触发 recoverSession()
-          if (data && Array.isArray(data.exams)) return write('exams', data)
+          // 仅在无解析错误时写缓存（教务未发布考试安排时返回空数组且无 error 属于可信空数据）
+          if (data && !data.error && Array.isArray(data.exams)) return write('exams', data)
           const cached = read<any>('exams')
           return cached ? { ...cached, stale: true, error: (data && data.error) || '' } : data
         } catch (e: any) {
@@ -1442,7 +1515,7 @@ export const androidApi = {
           if (e && e.code === 'NO_SESSION' && (await recoverSession())) {
             try {
               const again = await run()
-              if (again && Array.isArray(again.exams)) return write('exams', again)
+              if (again && !again.error && Array.isArray(again.exams)) return write('exams', again)
             } catch (_) {}
           }
           const cached = read<any>('exams')

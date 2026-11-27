@@ -1,14 +1,21 @@
 import rewardQrImg from './assets/reward-qr.jpg'
+import type { SponsorEntry } from './sponsors-remote.ts'
 
-export type SponsorEntry = {
-  name: string
-  amount: number
-  note?: string
-}
+export {
+  DEFAULT_SPONSORS_MANIFEST,
+  SPONSORS_CACHE_KEY,
+  fetchRemoteSponsors,
+  normalizeSponsorsManifest,
+  readCachedSponsors,
+  writeCachedSponsors,
+  type FetchSponsorsResult,
+  type SponsorEntry,
+  type SponsorsManifest
+} from './sponsors-remote.ts'
 
 /**
- * 投喂致谢名单（按金额降序展示；达到 3 人及以上时自动展示前三名领奖台，其余列于下方）。
- * 维护方式：收到同学赞赏并征得昵称展示同意后，追加到下方数组即可。
+ * 内置兜底致谢名单（云端 sponsors.json 不可达且无本地缓存时使用）。
+ * 日常更新请直接编辑仓库根目录的 sponsors.json，无需重新发版。
  */
 export const SPONSORS: SponsorEntry[] = []
 

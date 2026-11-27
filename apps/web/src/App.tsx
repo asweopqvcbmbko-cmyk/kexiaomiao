@@ -585,9 +585,15 @@ export default function App() {
       if (request === airconRequest.current && !demoModeRef.current) {
         const nextRoom = result?.status === 'ok' ? result.reading.room : room
         setAirconRoom(nextRoom)
-        setAirconResult(result)
-        syncTimesRef.current.aircon = Date.now()
-        updateFingerprint('aircon', fingerprintAircon(nextRoom, result), !!opts?.silent || !!fpRef.current.aircon)
+        const isTransientFailure = result?.status === 'query_failed'
+        setAirconResult((prev) => {
+          if (isTransientFailure && prev?.status === 'ok') return prev
+          return result
+        })
+        if (!isTransientFailure) {
+          syncTimesRef.current.aircon = Date.now()
+          updateFingerprint('aircon', fingerprintAircon(nextRoom, result), !!opts?.silent || !!fpRef.current.aircon)
+        }
       }
     } finally {
       if (request === airconRequest.current) {
@@ -614,9 +620,16 @@ export default function App() {
       if (request === dormRequest.current && !demoModeRef.current) {
         const nextRoom = result?.status === 'ok' ? result.reading.room : room
         setDormRoom(nextRoom)
-        setDormResult(result)
-        syncTimesRef.current.dorm = Date.now()
-        updateFingerprint('dorm', fingerprintDorm(nextRoom, result), !!opts?.silent || !!fpRef.current.dorm)
+        const isTransientFailure =
+          result?.status === 'query_failed' || result?.status === 'auth_required'
+        setDormResult((prev) => {
+          if (isTransientFailure && prev?.status === 'ok') return prev
+          return result
+        })
+        if (!isTransientFailure) {
+          syncTimesRef.current.dorm = Date.now()
+          updateFingerprint('dorm', fingerprintDorm(nextRoom, result), !!opts?.silent || !!fpRef.current.dorm)
+        }
       }
     } finally {
       if (request === dormRequest.current) {
@@ -962,21 +975,55 @@ export default function App() {
     }
   }, [onboardingOpen, demoMode, applyCached, refreshAll, refreshAircon, boot.snapshot])
 
-  /* 切回前台：按分层 SWR 静默重验证（不遮挡旧数据） */
+  /* 切回前台 & 断网恢复联网：按分层 SWR 静默重验证（不遮挡旧数据，1.5s 防抖避免瞬时双刷） */
+  const resumeTimerRef = useRef<number | null>(null)
+  const tabRef = useRef(tab)
+  tabRef.current = tab
+  const chaoxingDashRef = useRef(chaoxingDash)
+  chaoxingDashRef.current = chaoxingDash
+  const refreshChaoxingRef = useRef<((opts?: { force?: boolean }) => Promise<void>) | null>(null)
+
   useEffect(() => {
-    const onVis = () => {
-      if (document.visibilityState !== 'visible') return
+    const triggerResumeSync = (fromOnline: boolean) => {
       if (onboardingOpenRef.current || demoModeRef.current) return
-      void refreshAll({ force: false })
-      if (Date.now() - syncTimesRef.current.aircon >= SWR_FAST_TTL_MS) {
-        void refreshAircon({ silent: true })
-      }
-      if (Date.now() - (syncTimesRef.current.dorm ?? 0) >= SWR_FAST_TTL_MS) {
-        void refreshDorm({ silent: true })
-      }
+      if (resumeTimerRef.current !== null) window.clearTimeout(resumeTimerRef.current)
+      resumeTimerRef.current = window.setTimeout(() => {
+        resumeTimerRef.current = null
+        if (onboardingOpenRef.current || demoModeRef.current) return
+        void refreshAll({ force: false })
+        if (fromOnline || Date.now() - syncTimesRef.current.aircon >= SWR_FAST_TTL_MS) {
+          void refreshAircon({ silent: true })
+        }
+        if (fromOnline || Date.now() - (syncTimesRef.current.dorm ?? 0) >= SWR_FAST_TTL_MS) {
+          void refreshDorm({ silent: true })
+        }
+        const curDash = chaoxingDashRef.current
+        const needChaoxing =
+          tabRef.current === 'dashboard' ||
+          Boolean(curDash?.error) ||
+          curDash?.recovery?.state === 'retryable' ||
+          (fromOnline && Boolean(curDash?.authRequired))
+        if (needChaoxing) {
+          void refreshChaoxingRef.current?.({ force: fromOnline })
+        }
+      }, fromOnline ? 1200 : 300)
+    }
+    const onVis = () => {
+      if (document.visibilityState === 'visible') triggerResumeSync(false)
+    }
+    const onOnline = () => {
+      if (document.visibilityState === 'visible') triggerResumeSync(true)
     }
     document.addEventListener('visibilitychange', onVis)
-    return () => document.removeEventListener('visibilitychange', onVis)
+    window.addEventListener('online', onOnline)
+    return () => {
+      document.removeEventListener('visibilitychange', onVis)
+      window.removeEventListener('online', onOnline)
+      if (resumeTimerRef.current !== null) {
+        window.clearTimeout(resumeTimerRef.current)
+        resumeTimerRef.current = null
+      }
+    }
   }, [refreshAll, refreshAircon, refreshDorm])
 
   /* 周次锚点：拿到教务当前周就刷新；日期按「锚点周 + 偏移」推算 */
@@ -1186,6 +1233,7 @@ export default function App() {
       }
     }
   }, [toast])
+  refreshChaoxingRef.current = refreshChaoxing
 
   const loginChaoxing = useCallback(async (opts?: { manual?: boolean }) => {
     if (!opts?.manual && supportsNativeAuth()) {

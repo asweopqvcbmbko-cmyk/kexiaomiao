@@ -405,7 +405,7 @@
 
 @keyframes sm-live-halo {
   0%, 100% { box-shadow: 0 0 0 0 transparent; }
-  50% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--sm-accent) 20%, transparent); }
+  50% { box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.2); box-shadow: 0 0 0 3px color-mix(in srgb, var(--sm-accent) 20%, transparent); }
 }
 
 .sm-card-top,
@@ -600,7 +600,8 @@
 .sm-now-track i {
   position: absolute;
   inset-inline: 0;
-  border-top: 1px solid color-mix(in srgb, var(--sm-now) 56%, transparent);
+  border-top: 1px solid rgba(239, 68, 68, 0.56);
+  border-top-color: color-mix(in srgb, var(--sm-now) 56%, transparent);
 }
 
 .sm-now-track:not(.sm-now-today) i::before {

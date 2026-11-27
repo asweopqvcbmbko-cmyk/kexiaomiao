@@ -186,16 +186,23 @@ const EXAM_JS = String.raw`(() => {
     return head.indexOf('考试批次') >= 0 && head.indexOf('课程名称') >= 0;
   });
   const exams = [];
+  const emptyPattern = /(?:暂无|没有)(?:相关|任何)?考试(?:安排|数据)?|无考试安排/;
+  let invalidRow = false;
   if (tb) {
     const head = [...tb.rows[0].cells].map((c) => norm(c.innerText));
     for (const row of [...tb.rows].slice(1)) {
       const cells = [...row.cells].map((c) => norm(c.innerText));
       if (!cells.some(Boolean)) continue;
-      if (cells.join('').indexOf('考试批次') >= 0) continue;
+      const rowText = cells.join('');
+      if (rowText.indexOf('考试批次') >= 0 || /^(?:暂无数据|没有数据)$/.test(rowText) || emptyPattern.test(rowText)) continue;
       const o = {};
       head.forEach((h, i) => {
         o[h] = cells[i] || '';
       });
+      if (cells.length !== head.length || !o['课程名称']) {
+        invalidRow = true;
+        continue;
+      }
       exams.push({
         batch: o['考试批次'] || '',
         code: o['课程序号'] || '',
@@ -210,8 +217,14 @@ const EXAM_JS = String.raw`(() => {
       });
     }
   }
-  const termMatch = (document.body.innerText || '').match(/20\d\d-20\d\d学年\s*\d\s*学期/);
-  return JSON.stringify({ term: termMatch ? termMatch[0].replace(/\s+/g, '') : '', exams: exams });
+  const text = document.body.innerText || '';
+  const termMatch = text.match(/20\d\d-20\d\d学年\s*\d\s*学期/);
+  return JSON.stringify({
+    term: termMatch ? termMatch[0].replace(/\s+/g, '') : '',
+    exams,
+    recognized: tb ? !invalidRow : emptyPattern.test(text),
+    login: /请(?:先|重新)登录|登录已(?:失效|过期)/.test(text)
+  });
 })()`
 
 const DIAG_JS = String.raw`(() => {
@@ -231,16 +244,33 @@ const DIAG_JS = String.raw`(() => {
   });
 })()`
 
-function isLoginUrl(url) {
-  return /loginExt|cas\.haust\.edu\.cn|vpn\.haust\.edu\.cn|auth\.htm|passport/i.test(url || '')
+export function classifySchoolPage(url: string): 'eams' | 'expired' | 'network' | 'timeout' | 'cancelled' | 'unexpected' {
+  if (!url || /^(?:load-error:|chrome-error:|about:blank$)/i.test(url)) return 'network'
+  if (url === 'load-timeout:') return 'timeout'
+  if (url === 'load-cancelled:') return 'cancelled'
+  try {
+    const { hostname, pathname, protocol } = new URL(url)
+    if (protocol !== 'https:') return 'unexpected'
+    if (/^cas(?:-haust-edu-cn-s)?\.haust\.edu\.cn$/.test(hostname) && /^\/cas\/login\/?$/i.test(pathname)) return 'expired'
+    if (/^(?:vpn|webvpn)\.haust\.edu\.cn$/.test(hostname) &&
+        /^\/(?:auth\.htm|login(?:\.html?)?)?\/?$/i.test(pathname)) return 'expired'
+    if (hostname === 'jwgl-haust-edu-cn-s.haust.edu.cn' && pathname.startsWith('/eams/')) {
+      return /\/[^/]*login[^/]*\/?$/i.test(pathname) ? 'expired' : 'eams'
+    }
+  } catch {}
+  return 'unexpected'
+}
+
+export function blocksSchoolAutoLogin(reason: string): boolean {
+  return reason === 'credentials' || reason === 'locked' || reason === 'captcha' || reason === 'rate_limit'
 }
 
 function assertSession(url) {
-  if (String(url).indexOf('/eams/') < 0 || isLoginUrl(url)) {
-    const err = new Error('登录已失效 ' + String(url || '').slice(0, 140))
-    err.code = 'NO_SESSION'
-    throw err
-  }
+  const page = classifySchoolPage(url)
+  if (page === 'eams') return
+  const err = new Error(page === 'expired' ? '教务登录已失效' : '无法载入教务页面')
+  err.code = page === 'expired' ? 'NO_SESSION' : page
+  throw err
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -326,35 +356,33 @@ async function fetchCourseTable(engine) {
 
 async function fetchExams(engine) {
   const { url } = await loadTablePage(engine, EXAM_URL, EXAM_TABLE_URL)
-
-  await engine.waitFor(WAIT_EXAM_JS, 45000)
-  let data = null
+  const raw = await engine.waitFor(`(() => {
+    const raw = ${EXAM_JS};
+    const result = JSON.parse(raw);
+    return result.recognized || result.login ? raw : false;
+  })()`, 45000)
+  let data
   try {
-    const raw = await engine.run(EXAM_JS)
     data = typeof raw === 'string' ? JSON.parse(raw) : raw
-  } catch (err) {
-    data = { exams: [], term: '', error: String(err && err.message) }
-  }
-  if (data) data.pageUrl = url
-
-  // 表还没渲染出来时再等一次
-  if (!data.exams || !data.exams.length) {
-    await new Promise((r) => setTimeout(r, 6000))
-    try {
-      const raw2 = await engine.run(EXAM_JS)
-      const data2 = typeof raw2 === 'string' ? JSON.parse(raw2) : raw2
-      if (data2.exams && data2.exams.length) data = data2
-    } catch (_) {}
+  } catch (_) {}
+  if (data?.login) {
+    const error = new Error('教务登录已失效')
+    error.code = 'NO_SESSION'
+    throw error
   }
 
-  if (!data.exams || !data.exams.length) {
+  const fetchedAt = new Date().toISOString()
+  if (!data?.recognized || !Array.isArray(data.exams)) {
+    let diag
     try {
       const diagRaw = await engine.run(DIAG_JS)
-      data.diag = typeof diagRaw === 'string' ? JSON.parse(diagRaw) : diagRaw
-    } catch (_) {}
+      diag = typeof diagRaw === 'string' ? JSON.parse(diagRaw) : diagRaw
+    } catch (e) {
+      diag = { error: String(e && e.message) }
+    }
+    return { fetchedAt, pageUrl: url, term: '', exams: [], error: '无法识别教务考试安排', diag }
   }
-
-  return Object.assign({ fetchedAt: new Date().toISOString() }, data)
+  return { fetchedAt, pageUrl: url, term: data.term, exams: data.exams }
 }
 
 export { fetchCourseTable, fetchExams, COURSE_URL, EXAM_URL }

@@ -27,6 +27,7 @@ function isSessionError(response) {
 export function createCloudPaymentSession(transport, bootstrapBrowser, webViewFallback) {
   const cookies = new Map()
   let activatedAt = 0
+  let sessionVersion = 0
   let queue = Promise.resolve()
 
   function mergeCookies(url, values) {
@@ -192,9 +193,14 @@ export function createCloudPaymentSession(transport, bootstrapBrowser, webViewFa
     if (!['/CloudPayment/user/getRoom.do', '/CloudPayment/user/getRoomState.do'].includes(url.pathname)) {
       return Promise.reject(new Error('Unsupported CloudPayment query'))
     }
+    const requestVersion = sessionVersion
     const run = queue.then(async () => {
+      if (requestVersion !== sessionVersion) {
+        return { status: 401, data: { msg: '账号会话已切换，请重试' } }
+      }
       if (!activatedAt || Date.now() - activatedAt >= SESSION_TTL || !hasSessionCookie(cookieHeader(url))) {
         const failure = await initialize()
+        if (requestVersion !== sessionVersion) return { status: 401, data: { msg: '账号会话已切换，请重试' } }
         if (failure) return tryWebViewFallback(url, { status: failure.status, data: failure.data })
       }
       let response
@@ -203,13 +209,20 @@ export function createCloudPaymentSession(transport, bootstrapBrowser, webViewFa
       } catch (err) {
         return tryWebViewFallback(url, { status: 503, data: { msg: `电控请求失败（${err?.message || 'network'}）` } })
       }
+      if (requestVersion !== sessionVersion) {
+        return { status: 401, data: { msg: '账号会话已切换，请重试' } }
+      }
       if (isSessionError(response)) {
         const failure = await initialize()
+        if (requestVersion !== sessionVersion) return { status: 401, data: { msg: '账号会话已切换，请重试' } }
         if (failure) return tryWebViewFallback(url, { status: failure.status, data: failure.data })
         try {
           response = await get(url)
         } catch (err) {
           return tryWebViewFallback(url, { status: 503, data: { msg: `电控重试失败（${err?.message || 'network'}）` } })
+        }
+        if (requestVersion !== sessionVersion) {
+          return { status: 401, data: { msg: '账号会话已切换，请重试' } }
         }
         if (isSessionError(response)) {
           activatedAt = 0
@@ -220,6 +233,11 @@ export function createCloudPaymentSession(transport, bootstrapBrowser, webViewFa
     })
     queue = run.catch(() => undefined)
     return run
+  }
+  request.reset = () => {
+    sessionVersion += 1
+    activatedAt = 0
+    cookies.clear()
   }
   return request
 }
