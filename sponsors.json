@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "published": true,
-  "updatedAt": "2026-11-27T08:30:00Z",
+  "updatedAt": "2026-11-28T05:00:16Z",
   "title": "感谢你的投喂喵～",
   "subtitle": "未来也会持续更新优化！",
   "entries": [
@@ -15,6 +15,11 @@
       "name": "安逸沦也",
       "amount": 1,
       "date": "2026-11-26"
+    },
+    {
+      "name": "落",
+      "amount": 10,
+      "date": "2026-11-28"
     }
   ]
 }
